@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Grid Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>⚡ Distributed Grid Monitor</h1>
+            <div class="status-badge" id="sys-status">System Online</div>
+        </header>
+
+        <main>
+            <section class="stats-row">
+                <div class="card stat-card">
+                    <h3>Active Nodes</h3>
+                    <div class="value" id="node-count">0</div>
+                </div>
+                <div class="card stat-card">
+                    <h3>Peak Load</h3>
+                    <div class="value" id="peak-load">0%</div>
+                </div>
+                <div class="card stat-card">
+                    <h3>Outages</h3>
+                    <div class="value alert" id="outage-count">0</div>
+                </div>
+            </section>
+
+            <section class="card table-card">
+                <h2>Live Node Status</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>District ID</th>
+                                <th>Status</th>
+                                <th>Voltage</th>
+                                <th>Power State</th>
+                                <th>Region (Zone)</th>
+                                <th>Last Seen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="node-table-body">
+                            <!-- Data injected here -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

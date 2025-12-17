@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Meter Simulator</title>
+    <link rel="stylesheet" href="client_style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div class="container">
+        <header>
+            <h1>⚡ Smart Meter</h1>
+            <div id="status-badge" class="status-badge disconnected">Disconnected</div>
+        </header>
+
+        <section class="card control-card">
+            <h2>Simulator Controls</h2>
+            <div class="control-grid">
+                <div class="control-group">
+                    <label>Connection</label>
+                    <button id="btn-connect" onclick="action('connect')">Auto Connect</button>
+                    <button id="btn-disconnect" onclick="action('disconnect')" class="secondary">Disconnect</button>
+                </div>
+                <div class="control-group">
+                    <label>Events</label>
+                    <button onclick="action('heartbeat')" class="success">Send Heartbeat</button>
+                    <button onclick="action('outage_start')" class="danger">Trigger Outage</button>
+                    <button onclick="action('outage_end')" class="info">Resolve Outage</button>
+                </div>
+            </div>
+        </section>
+
+        <section class="card log-card">
+            <h2>Device Logs</h2>
+            <div id="log-container" class="log-container">
+                <!-- Logs here -->
+            </div>
+        </section>
+    </div>
+
+    <script src="client_script.js"></script>
+</body>
+
+</html>
