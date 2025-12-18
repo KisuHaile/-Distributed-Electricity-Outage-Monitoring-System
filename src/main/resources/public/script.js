@@ -21,6 +21,8 @@ function updateDashboard(nodes) {
     currentNodes = nodes;
     // Helper to calculate stats
     let totalNodes = nodes.length;
+    let onlineCount = 0;
+    let offlineCount = 0;
     let outageCount = 0;
 
     const grid = document.getElementById('node-grid');
@@ -34,6 +36,8 @@ function updateDashboard(nodes) {
         let regionStr = parts.length > 1 ? parts[1].trim() : "Unknown";
 
         // 2. Stats
+        if (node.status === 'ONLINE') onlineCount++;
+        else offlineCount++;
         let vVal_temp = parseFloat(voltageStr) || 0;
         if (node.power.toLowerCase() === 'off' || node.power.toLowerCase() === 'outage' || vVal_temp <= 10) outageCount++;
 
@@ -98,6 +102,8 @@ function updateDashboard(nodes) {
 
     // Update Stats Cards
     document.getElementById('node-count').textContent = totalNodes;
+    document.getElementById('online-count').textContent = onlineCount;
+    document.getElementById('offline-count').textContent = offlineCount;
     document.getElementById('outage-count').textContent = outageCount;
 
     // Status Badge

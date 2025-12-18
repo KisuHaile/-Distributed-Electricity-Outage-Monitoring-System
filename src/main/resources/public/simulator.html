@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>District Web Simulator</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .sim-container {
+            max-width: 500px;
+            margin: 40px auto;
+            padding: 2rem;
+        }
+
+        .control-group {
+            margin-bottom: 2rem;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 1.5rem;
+            border-radius: 12px;
+        }
+
+        .v-display {
+            font-size: 3rem;
+            font-weight: 700;
+            text-align: center;
+            margin: 1rem 0;
+            color: #22c55e;
+        }
+
+        .btn-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            margin: 10px 0;
+        }
+
+        .status-pill {
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+    </style>
+</head>
+
+<body class="dark-theme">
+    <div class="sim-container">
+        <header style="text-align: center; margin-bottom: 2rem;">
+            <h1>🕹️ District Simulator</h1>
+            <p style="color: var(--text-secondary)">No-Code Virtual Client</p>
+        </header>
+
+        <div id="setup-area" class="card control-group">
+            <h3>Configuration</h3>
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 1rem;">
+                <input type="text" id="node-id" placeholder="District ID (e.g. Bole_01)"
+                    style="padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #000; color: #fff;">
+                <input type="text" id="region" placeholder="Region Name"
+                    style="padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #000; color: #fff;">
+                <button onclick="startSimulator()" class="btn-action" style="width: 100%">Connect to Grid</button>
+            </div>
+        </div>
+
+        <div id="main-sim" style="display: none;">
+            <div class="card control-group">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span id="display-id" style="font-weight: 700;">---</span>
+                    <span class="status-pill" id="power-label">NORMAL</span>
+                </div>
+                <div class="v-display" id="v-val">220.0V</div>
+                <input type="range" id="v-slider" min="0" max="250" value="220" oninput="updateVoltage(this.value)">
+                <div
+                    style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-secondary)">
+                    <span>0V</span>
+                    <span>Outage (0-10V) | Low (170-200V) | Normal (>200V)</span>
+                    <span>250V</span>
+                </div>
+            </div>
+
+            <div class="btn-grid">
+                <button onclick="reportOutage()" class="btn-action" style="background: #ef4444;">Report Outage</button>
+                <button onclick="reportRestore()" class="btn-action" style="background: #22c55e;">Restore Power</button>
+            </div>
+
+            <p id="hq-msg"
+                style="margin-top: 1.5rem; text-align: center; font-size: 0.9rem; color: #eab308; display: none;">
+                ⚠️ <b>HQ REQUEST:</b> Please confirm if the problem is solved.
+                <button onclick="confirmResolved()" class="btn-action"
+                    style="margin-top: 10px; width: 100%; height: auto; padding: 10px;">Yes, Problem Solved</button>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        let config = { id: '', region: '', voltage: 220, power: 'NORMAL', active: false, confirmPending: false };
+
+        function startSimulator() {
+            const id = document.getElementById('node-id').value;
+            const region = document.getElementById('region').value;
+            if (!id) return alert("Enter District ID");
+
+            config.id = id;
+            config.region = region;
+            config.active = true;
+
+            document.getElementById('setup-area').style.display = 'none';
+            document.getElementById('main-sim').style.display = 'block';
+            document.getElementById('display-id').textContent = id;
+
+            runLifeCycle();
+        }
+
+        function updateVoltage(v) {
+            config.voltage = v;
+            document.getElementById('v-val').textContent = v + ".0V";
+            const label = document.getElementById('v-val');
+            if (v <= 10) { label.style.color = '#64748b'; config.power = 'OUTAGE'; }
+            else if (v < 170) { label.style.color = '#ef4444'; config.power = 'VERY LOW'; }
+            else if (v < 200) { label.style.color = '#eab308'; config.power = 'LOW'; }
+            else { label.style.color = '#22c55e'; config.power = 'NORMAL'; }
+            document.getElementById('power-label').textContent = config.power;
+            sendReport();
+        }
+
+        function reportOutage() {
+            document.getElementById('v-slider').value = 0;
+            updateVoltage(0);
+        }
+
+        function reportRestore() {
+            document.getElementById('v-slider').value = 220;
+            updateVoltage(220);
+        }
+
+        async function sendReport(cmd = '') {
+            if (!config.active) return;
+            try {
+                const url = `/api/report_web?id=${config.id}&v=${config.voltage}&p=${config.power}&r=${config.region}&cmd=${cmd}`;
+                await fetch(url);
+            } catch (e) { }
+        }
+
+        async function pollCommands() {
+            if (!config.active) return;
+            try {
+                const res = await fetch(`/api/poll?id=${config.id}`);
+                const data = await res.json();
+                if (data.command === 'SOLVED_CHECK') {
+                    document.getElementById('hq-msg').style.display = 'block';
+                }
+            } catch (e) { }
+        }
+
+        function confirmResolved() {
+            document.getElementById('hq-msg').style.display = 'none';
+            sendReport('CONFIRM_RESOLVED');
+            alert("Confirmation sent to HQ!");
+        }
+
+        function runLifeCycle() {
+            sendReport();
+            setInterval(sendReport, 5000); // Pulse heartbeat
+            setInterval(pollCommands, 2000); // Check for HQ messages
+        }
+    </script>
+</body>
+
+</html>
