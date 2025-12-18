@@ -13,7 +13,10 @@
     <div class="container">
         <header>
             <h1>⚡ Distributed Grid Monitor</h1>
-            <div class="status-badge" id="sys-status">System Online</div>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <button id="btn-add-client" class="btn-action">Add Manual Client</button>
+                <div class="status-badge" id="sys-status">System Online</div>
+            </div>
         </header>
 
         <main>
@@ -22,37 +25,33 @@
                     <h3>Active Nodes</h3>
                     <div class="value" id="node-count">0</div>
                 </div>
-                <div class="card stat-card">
-                    <h3>Peak Load</h3>
-                    <div class="value" id="peak-load">0%</div>
-                </div>
+
                 <div class="card stat-card">
                     <h3>Outages</h3>
                     <div class="value alert" id="outage-count">0</div>
                 </div>
             </section>
 
-            <section class="card table-card">
-                <h2>Live Node Status</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>District ID</th>
-                                <th>Status</th>
-                                <th>Voltage</th>
-                                <th>Power State</th>
-                                <th>Region (Zone)</th>
-                                <th>Last Seen</th>
-                            </tr>
-                        </thead>
-                        <tbody id="node-table-body">
-                            <!-- Data injected here -->
-                        </tbody>
-                    </table>
+            <section class="grid-section">
+                <h2 style="margin-bottom: 1rem; color: var(--text-secondary);">District Overview</h2>
+                <div id="node-grid" class="node-grid">
+                    <!-- Cards injected here -->
                 </div>
             </section>
         </main>
+
+        <!-- Details Modal -->
+        <div id="detail-modal" class="modal-overlay">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h2 id="modal-title">District Details</h2>
+                    <button class="modal-close" onclick="closeModal()">&times;</button>
+                </div>
+                <div id="modal-details">
+                    <!-- Dynamic Details -->
+                </div>
+            </div>
+        </div>
     </div>
 
     <script src="script.js"></script>

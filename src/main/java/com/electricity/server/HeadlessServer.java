@@ -1,10 +1,7 @@
 package com.electricity.server;
 
 import com.electricity.db.DBConnection;
-import com.electricity.monitor.NodeMonitor;
 import com.electricity.service.DiscoveryService;
-import com.electricity.service.ElectionManager;
-import com.electricity.model.Peer;
 import com.electricity.server.web.SimpleWebServer;
 
 import java.io.IOException;
@@ -21,7 +18,6 @@ public class HeadlessServer {
 
     private static volatile boolean running = true;
     private static ServerSocket serverSocket;
-    private static ElectionManager electionManager;
     private static DiscoveryService discoveryService;
 
     public static void main(String[] args) {
@@ -74,29 +70,75 @@ public class HeadlessServer {
         }
     }
 
+    private static java.util.Map<Integer, Long> peerLastSeen = new java.util.concurrent.ConcurrentHashMap<>();
+    private static volatile boolean amILeader = true;
+    private static int myServerId;
+
+    private static void checkLeadership() {
+        boolean highest = true;
+        long now = System.currentTimeMillis();
+        for (java.util.Map.Entry<Integer, Long> entry : peerLastSeen.entrySet()) {
+            if (now - entry.getValue() < 15000) { // Active in last 15s
+                if (entry.getKey() > myServerId) {
+                    highest = false;
+                    break;
+                }
+            }
+        }
+        if (amILeader != highest) {
+            amILeader = highest;
+            System.out.println("[Election] Leadership Change: Am I Leader? " + (amILeader ? "YES" : "NO"));
+        }
+    }
+
     private static void startServerThreads(int myId, int port, String peersStr) {
+        myServerId = myId;
         new Thread(() -> {
             try (ServerSocket ss = new ServerSocket(port)) {
                 serverSocket = ss;
-                System.out.println("Utility HQ Server (Central Authority) listening on port " + port);
+                System.out.println("Utility HQ Server #" + myId + " listening on port " + port);
 
-                // No ElectionManager needed for Central Authority
-                // No DiscoveryService needed (Clients connect directly to HQ)
+                // Start Peer Cleanup Thread
+                new Thread(() -> {
+                    while (running) {
+                        try {
+                            Thread.sleep(5000);
+                            long now = System.currentTimeMillis();
+                            peerLastSeen.entrySet().removeIf(e -> now - e.getValue() > 15000);
+                            checkLeadership();
+                        } catch (InterruptedException e) {
+                            break;
+                        }
+                    }
+                }).start();
 
                 int clientCounter = 0;
 
-                // START DISCOVERY BEACON (Announce Presence)
-                // We broadcast "HELLO|ID|PORT|true" so clients can find us
+                // START DISCOVERY BEACON
                 DiscoveryService beacon = new DiscoveryService(myId, port, (peer) -> {
-                }, () -> true);
+                    peerLastSeen.put(peer.getId(), System.currentTimeMillis());
+                    checkLeadership();
+                }, () -> amILeader);
                 new Thread(beacon).start();
 
                 while (running) {
                     try {
                         Socket socket = serverSocket.accept();
                         clientCounter++;
-                        // Pass null for elections - we are the Authority
-                        ClientHandler handler = new ClientHandler(socket, clientCounter, null);
+
+                        // Reject clients if not leader?
+                        // If client found us via discovery, they check isLeader flag.
+                        // But if race condition, they might connect just as we lose leadership.
+                        // Ideally we check here.
+                        if (!amILeader) {
+                            // Optional: close connection or redirect.
+                            // For now, let's allow it but warn.
+                            // Actually, "Share Database Data" implies all servers access DB.
+                            // Leader just coordinates.
+                            // So it's fine if they connect. But usually clients prefer Leader.
+                        }
+
+                        ClientHandler handler = new ClientHandler(socket, clientCounter);
                         new Thread(handler).start();
                     } catch (SocketException se) {
                         if (running)

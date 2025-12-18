@@ -138,3 +138,76 @@ button.info {
 .log-entry {
     margin-bottom: 4px;
 }
+
+/* Modal and Configuration */
+.modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(15, 23, 42, 0.9);
+    backdrop-filter: blur(8px);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+}
+
+.modal-content {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    padding: 2rem;
+    border-radius: 16px;
+    width: 90%;
+    max-width: 400px;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+}
+
+.form-group {
+    margin-bottom: 1.5rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
+input[type="text"] {
+    width: 100%;
+    background: var(--bg-color);
+    border: 1px solid var(--border);
+    color: white;
+    padding: 0.8rem;
+    border-radius: 8px;
+    outline: none;
+    box-sizing: border-box;
+}
+
+input:focus {
+    border-color: var(--accent);
+}
+
+.primary-btn {
+    width: 100%;
+    background: var(--accent) !important;
+    color: var(--bg-color) !important;
+    border: none !important;
+    margin-top: 1rem;
+}
+
+.btn-settings {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--border);
+    padding: 0.4rem 0.8rem;
+    border-radius: 8px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.btn-settings:hover {
+    color: white;
+    background: rgba(255, 255, 255, 0.1);
+}

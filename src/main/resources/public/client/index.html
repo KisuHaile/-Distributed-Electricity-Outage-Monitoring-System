@@ -11,34 +11,74 @@
 
 <body>
     <div class="container">
+        <!-- Configuration Modal -->
+        <div id="config-modal" class="modal-overlay">
+            <div class="modal-content">
+                <h2>District Configuration</h2>
+                <p>Please initialize this field office.</p>
+                <div class="form-group">
+                    <label>Region / Zone</label>
+                    <input type="text" id="config-region" placeholder="e.g. Addis Ababa North" value="Addis Ababa">
+                </div>
+                <div class="form-group">
+                    <label>District ID</label>
+                    <input type="text" id="config-id" placeholder="e.g. District-01" value="District-01">
+                </div>
+                <button onclick="configureClient()" class="primary-btn">Initialize & Connect</button>
+            </div>
+        </div>
+
         <header>
-            <h1>⚡ Smart Meter</h1>
-            <div id="status-badge" class="status-badge disconnected">Disconnected</div>
+            <h1>⚡ District Office Dashboard</h1>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <button onclick="document.getElementById('config-modal').style.display='flex'" class="btn-settings">⚙️
+                    Settings</button>
+                <div id="status-badge" class="status-badge disconnected">Offline</div>
+            </div>
         </header>
 
-        <section class="card control-card">
-            <h2>Simulator Controls</h2>
-            <div class="control-grid">
-                <div class="control-group">
-                    <label>Connection</label>
-                    <button id="btn-connect" onclick="action('connect')">Auto Connect</button>
-                    <button id="btn-disconnect" onclick="action('disconnect')" class="secondary">Disconnect</button>
-                </div>
-                <div class="control-group">
-                    <label>Events</label>
-                    <button onclick="action('heartbeat')" class="success">Send Heartbeat</button>
-                    <button onclick="action('outage_start')" class="danger">Trigger Outage</button>
-                    <button onclick="action('outage_end')" class="info">Resolve Outage</button>
+        <section class="info-row">
+            <div class="card info-card">
+                <h3>Assigned District</h3>
+                <div class="value" id="display-id">--</div>
+                <div class="sub" id="display-region">--</div>
+            </div>
+            <div class="card info-card">
+                <h3>Grid Voltage</h3>
+                <div class="value" id="display-voltage">0.0 V</div>
+                <div class="sub" id="display-power-state">UNKNOWN</div>
+                <div style="margin-top: 1rem;">
+                    <div style="font-size: 0.7rem; color: var(--text-secondary); margin-bottom: 5px; font-weight: 600;">
+                        RANGE: <span style="color:var(--success)">Normal (>200V)</span> |
+                        <span style="color:#eab308">Low (170-200V)</span> |
+                        <span style="color:var(--danger)">Very Low (<170V)< /span>
+                    </div>
+                    <div style="display: flex; gap: 5px;">
+                        <input type="number" id="input-voltage" step="0.1" placeholder="Set V"
+                            style="width: 80px; padding: 5px; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-color); color: white;">
+                        <button onclick="setManualVoltage()"
+                            style="padding: 5px 10px; margin:0; font-size: 0.8rem;">Update</button>
+                    </div>
                 </div>
             </div>
         </section>
 
-        <section class="card log-card">
-            <h2>Device Logs</h2>
-            <div id="log-container" class="log-container">
-                <!-- Logs here -->
+        <section class="card control-card">
+            <h2>Actions</h2>
+            <div class="control-grid">
+                <div class="control-group">
+                    <button onclick="action('connect')" id="btn-reconnect" style="display:none;">Reconnect</button>
+                    <button onclick="action('disconnect')" class="secondary">Go Offline</button>
+                </div>
+                <div class="control-group">
+                    <label>Report Status</label>
+                    <button onclick="action('outage_start')" class="danger">Report Outage</button>
+                    <button onclick="action('outage_end')" class="info">Restored</button>
+                </div>
             </div>
         </section>
+
+        <!-- Logs section removed -->
     </div>
 
     <script src="client_script.js"></script>

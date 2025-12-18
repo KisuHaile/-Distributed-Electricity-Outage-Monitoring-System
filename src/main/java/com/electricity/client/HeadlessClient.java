@@ -1,6 +1,5 @@
 package com.electricity.client;
 
-import com.electricity.service.DiscoveryService;
 import com.electricity.client.web.ClientWebServer;
 
 import java.io.BufferedReader;
@@ -23,8 +22,6 @@ public class HeadlessClient {
     private BufferedReader in;
     private volatile boolean connected = false;
     private Thread listenerThread;
-    private Thread heartbeatThread;
-    private DiscoveryService discoveryService;
     private List<String> logs = Collections.synchronizedList(new ArrayList<>());
 
     private static final DateTimeFormatter DF = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
@@ -52,15 +49,16 @@ public class HeadlessClient {
 
         System.out.println("Open Client Dashboard: http://localhost:" + webPort + "/client/");
 
-        // Auto-connect on start
+        // Auto-connect enabled by default to allow remote "Invitation" from server.
         client.startAutoDiscovery();
 
         // Keep alive
-        Scanner scanner = new Scanner(System.in);
-        while (true) {
-            String line = scanner.nextLine();
-            if ("q".equals(line))
-                System.exit(0);
+        try (Scanner scanner = new Scanner(System.in)) {
+            while (true) {
+                String line = scanner.nextLine();
+                if ("q".equals(line))
+                    System.exit(0);
+            }
         }
     }
 
@@ -93,9 +91,7 @@ public class HeadlessClient {
         return connected;
     }
 
-    public String getNodeId() {
-        return nodeId;
-    }
+    // getNodeId moved to bottom
 
     public void connectToHQ(String ip, int port) {
         new Thread(() -> {
@@ -117,7 +113,7 @@ public class HeadlessClient {
                         log("Connected to Central Authority.");
                         connected = true;
                         startListener();
-                        startAutoReport();
+                        startAutoReport(); // Start automatic reporting
                         break; // Exit retry loop
                     } else {
                         log("HQ rejected connection: " + resp);
@@ -135,10 +131,32 @@ public class HeadlessClient {
         }).start();
     }
 
+    public void configureAndConnect(String id, String region) {
+        this.nodeId = id;
+        this.region = region;
+        log("Configuration received: ID=" + id + ", Region=" + region);
+        if (!connected) {
+            startAutoDiscovery();
+        }
+    }
+
+    private void startAutoReport() {
+        new Thread(() -> {
+            while (connected && !Thread.currentThread().isInterrupted()) {
+                try {
+                    sendReport();
+                    Thread.sleep(5000); // Send report every 5 seconds
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        }).start();
+    }
+
     public void startAutoDiscovery() {
         if (connected)
             return;
-        log("Scanning for Utility HQ Signal (Multicast)...");
+        log("District " + nodeId + " (" + region + ") scanning for Utility HQ...");
 
         new Thread(() -> {
             try (java.net.MulticastSocket socket = new java.net.MulticastSocket(4446)) {
@@ -167,7 +185,7 @@ public class HeadlessClient {
             } catch (Exception e) {
                 log("Auto-discovery failed: " + e.getMessage());
                 // Fallback to local
-                log("Fallback: searching local...");
+                log("Fallback: searching local 127.0.0.1...");
                 connectToHQ("127.0.0.1", 9000);
             }
         }).start();
@@ -175,8 +193,6 @@ public class HeadlessClient {
 
     public void disconnect() {
         // No discovery service to stop
-        if (heartbeatThread != null)
-            heartbeatThread.interrupt();
         closeSocket();
         log("Disconnected.");
     }
@@ -196,6 +212,17 @@ public class HeadlessClient {
                 String line;
                 while (connected && (line = in.readLine()) != null) {
                     log("Central: " + line);
+                    String cmd = line.trim().toUpperCase();
+                    if ("SOLVED_CHECK".equals(cmd)) {
+                        log("HQ is inquiring if the problem is solved...");
+                        if ("NORMAL".equals(currentPowerState)) {
+                            log("Sending Confirmation: Problem is RESOLVED.");
+                            send("CONFIRM_RESOLVED|" + nodeId);
+                        } else {
+                            log("Grid is still down. Reporting current status...");
+                            sendReport();
+                        }
+                    }
                 }
             } catch (Exception e) {
                 if (connected)
@@ -208,47 +235,87 @@ public class HeadlessClient {
         listenerThread.start();
     }
 
-    private void startAutoReport() {
-        heartbeatThread = new Thread(() -> {
-            log("Auto-reporting started (every 10s)...");
-            try {
-                // Initial delay
-                Thread.sleep(1000);
-                if (connected)
-                    sendReport();
+    private String region = "Unknown";
+    private double currentVoltage = 220.0;
+    private String currentPowerState = "NORMAL";
 
-                while (connected && !Thread.currentThread().isInterrupted()) {
-                    Thread.sleep(10000);
-                    if (connected)
-                        sendReport();
-                }
-            } catch (InterruptedException e) {
-                log("Auto-reporting stopped.");
-            }
-        });
-        heartbeatThread.setDaemon(true);
-        heartbeatThread.start();
+    public void updateState(String newState) {
+        this.currentPowerState = newState;
+        updateSimulation(); // Apply immediately
+        log("Manual State Update: " + newState);
+    }
+
+    private boolean manualVoltageMode = false;
+
+    public void setManualVoltage(double v) {
+        this.manualVoltageMode = true;
+        this.currentVoltage = v;
+        log("Manual Voltage set to: " + v + "V");
+        sendReport(); // Send update immediately
+    }
+
+    private void updateSimulation() {
+        if (manualVoltageMode)
+            return; // Don't fluctuate if manual
+
+        // Simulate voltage fluctuation
+        if ("NORMAL".equals(currentPowerState)) {
+            // 215V - 225V
+            currentVoltage = 220.0 + (Math.random() * 10 - 5);
+        } else if ("LOW".equals(currentPowerState)) {
+            // 180V - 185V
+            currentVoltage = 180.0 + (Math.random() * 5);
+        } else {
+            currentVoltage = 0.0;
+        }
     }
 
     public void sendReport() {
         if (!connected)
             return;
-        // Logic: REPORT|NodeId|Voltage|PowerState
-        // PowerState: NORMAL, LOW, OFF
-        double voltage = 220.0 + (Math.random() * 10 - 5); // 215-225V
-        String state = "NORMAL";
-        if (Math.random() < 0.1) {
-            voltage = 180;
-            state = "LOW";
-        }
+        // REPORT|NodeId|Voltage|PowerState|Region
+        // We append region to the report so server knows it (if server supports it)
+        // Check if server supports region in ClientHandler first?
+        // ClientHandler expects: REPORT|nodeId|voltage|powerState
+        // We will stick to protocol: REPORT|nodeId|voltage|powerState
+        // Metadata like Region should ideally be sent once or we update Server to
+        // accept it.
+        // For now, let's stick to valid server protocol.
 
-        String msg = String.format("REPORT|%s|%.1f|%s", nodeId, voltage, state);
+        String msg = String.format("REPORT|%s|%.1f|%s|%s", nodeId, currentVoltage, currentPowerState, region);
         send(msg);
+    }
+
+    // Getters for Web API
+    public double getVoltage() {
+        return currentVoltage;
+    }
+
+    public String getPowerState() {
+        return currentPowerState;
+    }
+
+    public String getRegion() {
+        return region;
+    }
+
+    public String getNodeId() {
+        return nodeId;
     }
 
     public void sendOutage(String type) {
         if (!connected)
             return;
+
+        // Update local state so heartbeats reflect the outage!
+        if ("START".equals(type)) {
+            this.currentPowerState = "OUTAGE";
+            log("🚫 OUTAGE STARTED (Heartbeats will report OUTAGE)");
+        } else {
+            this.currentPowerState = "NORMAL";
+            log("✅ OUTAGE RESOLVED (Heartbeats will report NORMAL)");
+        }
+
         String eventId = UUID.randomUUID().toString();
         String ts = LocalDateTime.now().format(DF);
 

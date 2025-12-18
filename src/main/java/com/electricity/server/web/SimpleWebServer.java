@@ -5,6 +5,7 @@ import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpExchange;
 
 import com.electricity.db.DBConnection;
+import com.electricity.server.ClientHandler;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -13,7 +14,6 @@ import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.io.File;
 
 public class SimpleWebServer {
@@ -29,6 +29,8 @@ public class SimpleWebServer {
             HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
             server.createContext("/", new StaticHandler());
             server.createContext("/api/nodes", new ApiHandler());
+            server.createContext("/api/invite", new InviteHandler());
+            server.createContext("/api/verify", new VerifyHandler());
             server.setExecutor(null); // creates a default executor
             server.start();
             System.out.println("Web Dashboard running at http://localhost:" + port + "/");
@@ -40,26 +42,20 @@ public class SimpleWebServer {
     static class StaticHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange t) throws IOException {
-            String uri = t.getRequestURI().toString();
+            String uri = t.getRequestURI().getPath();
             if (uri.equals("/")) {
                 uri = "/index.html";
             }
 
             // Basic security: prevent traversing up directories
             if (uri.contains("..")) {
-                String response = "403 Forbidden";
-                t.sendResponseHeaders(403, response.length());
-                OutputStream os = t.getResponseBody();
-                os.write(response.getBytes());
-                os.close();
+                send(t, 403, "403 Forbidden");
                 return;
             }
 
-            // Load from src/main/resources/public (development mostly) or classpath
-            // We'll try loading from file system relative to execution first for easier dev
+            // Load from src/main/resources/public
             File file = new File("src/main/resources/public" + uri);
             if (!file.exists()) {
-                // Try just "resources/public" if compiled structure is different
                 file = new File("resources/public" + uri);
             }
 
@@ -69,12 +65,15 @@ public class SimpleWebServer {
                 Files.copy(file.toPath(), os);
                 os.close();
             } else {
-                String response = "404 Not Found";
-                t.sendResponseHeaders(404, response.length());
-                OutputStream os = t.getResponseBody();
-                os.write(response.getBytes());
-                os.close();
+                send(t, 404, "404 Not Found");
             }
+        }
+
+        private void send(HttpExchange t, int code, String body) throws IOException {
+            t.sendResponseHeaders(code, body.length());
+            OutputStream os = t.getResponseBody();
+            os.write(body.getBytes());
+            os.close();
         }
     }
 
@@ -126,6 +125,75 @@ public class SimpleWebServer {
             if (s == null)
                 return "";
             return s.replace("\"", "\\\"");
+        }
+    }
+
+    static class InviteHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange t) throws IOException {
+            String query = t.getRequestURI().getQuery();
+            String ip = null;
+            if (query != null && query.contains("ip=")) {
+                ip = query.split("ip=")[1].split("&")[0];
+            }
+
+            if (ip == null || ip.isEmpty()) {
+                send(t, 400, "{\"error\":\"Missing IP\"}");
+                return;
+            }
+
+            // Send UDP Invite
+            try {
+                // protocol: HELLO|ServerId|TcpPort|IsLeader
+                String msg = "HELLO|1|9000|true";
+                byte[] buf = msg.getBytes();
+                java.net.InetAddress address = java.net.InetAddress.getByName(ip);
+                java.net.DatagramPacket packet = new java.net.DatagramPacket(buf, buf.length, address, 4446);
+                try (java.net.DatagramSocket s = new java.net.DatagramSocket()) {
+                    s.send(packet);
+                }
+                send(t, 200, "{\"status\":\"sent\", \"target\":\"" + ip + "\"}");
+            } catch (Exception e) {
+                send(t, 500, "{\"error\":\"" + e.getMessage() + "\"}");
+            }
+        }
+
+        private void send(HttpExchange t, int code, String body) throws IOException {
+            t.getResponseHeaders().set("Content-Type", "application/json");
+            t.sendResponseHeaders(code, body.length());
+            t.getResponseBody().write(body.getBytes());
+            t.getResponseBody().close();
+        }
+    }
+
+    static class VerifyHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange t) throws IOException {
+            String query = t.getRequestURI().getQuery();
+            String id = null;
+            if (query != null && query.contains("id=")) {
+                id = query.split("id=")[1].split("&")[0];
+            }
+
+            if (id == null || id.isEmpty()) {
+                send(t, 400, "{\"error\":\"Missing ID\"}");
+                return;
+            }
+
+            ClientHandler handler = ClientHandler.getHandler(id);
+            if (handler != null) {
+                handler.sendMessage("SOLVED_CHECK");
+                send(t, 200, "{\"status\":\"sent\"}");
+            } else {
+                send(t, 404, "{\"error\":\"Node not connected\"}");
+            }
+        }
+
+        private void send(HttpExchange t, int code, String body) throws IOException {
+            t.getResponseHeaders().set("Content-Type", "application/json");
+            t.sendResponseHeaders(code, body.length());
+            t.getResponseBody().write(body.getBytes());
+            t.getResponseBody().close();
         }
     }
 }
