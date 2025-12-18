@@ -22,6 +22,6 @@ echo (This Console must stay open)
 echo.
 
 REM Arguments: [id] [port] [webPort] [peers] [dbHost]
-REM Example for Node 1:
-java -cp "%CP%" com.electricity.server.HeadlessServer 1 9000 3000 "2:localhost:8081" "localhost"
+REM peerConfig = auto (recommended)
+java -cp "%CP%" com.electricity.server.HeadlessServer 1 9000 3000 "auto" "localhost"
 pause

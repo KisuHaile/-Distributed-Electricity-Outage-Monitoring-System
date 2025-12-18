@@ -4,11 +4,13 @@ public class Peer {
     private int id;
     private String host;
     private int port;
+    private boolean isLeader;
 
-    public Peer(int id, String host, int port) {
+    public Peer(int id, String host, int port, boolean isLeader) {
         this.id = id;
         this.host = host;
         this.port = port;
+        this.isLeader = isLeader;
     }
 
     public int getId() {
@@ -21,5 +23,9 @@ public class Peer {
 
     public int getPort() {
         return port;
+    }
+
+    public boolean isLeader() {
+        return isLeader;
     }
 }

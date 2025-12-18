@@ -6,6 +6,7 @@ import com.sun.net.httpserver.HttpExchange;
 
 import com.electricity.db.DBConnection;
 import com.electricity.server.ClientHandler;
+import com.electricity.server.HeadlessServer;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -29,6 +30,7 @@ public class SimpleWebServer {
             HttpServer server = HttpServer.create(new InetSocketAddress(port), 0);
             server.createContext("/", new StaticHandler());
             server.createContext("/api/nodes", new ApiHandler());
+            server.createContext("/api/stats", new StatsHandler());
             server.createContext("/api/invite", new InviteHandler());
             server.createContext("/api/verify", new VerifyHandler());
             server.createContext("/api/report_web", new WebReportHandler());
@@ -110,6 +112,10 @@ public class SimpleWebServer {
                     }
                     sb.append("]");
                     json = sb.toString();
+                    if (!first) {
+                        System.out.println("[API] Dashboard polled. Serving "
+                                + (first ? 0 : 1 + sb.toString().split("},").length - 1) + " nodes.");
+                    }
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -147,7 +153,8 @@ public class SimpleWebServer {
             // Send UDP Invite
             try {
                 // protocol: HELLO|ServerId|TcpPort|IsLeader
-                String msg = "HELLO|1|9000|true";
+                String msg = "HELLO|" + HeadlessServer.getServerId() + "|" + HeadlessServer.getServerPort() + "|"
+                        + HeadlessServer.isLeader();
                 byte[] buf = msg.getBytes();
                 java.net.InetAddress address = java.net.InetAddress.getByName(ip);
                 java.net.DatagramPacket packet = new java.net.DatagramPacket(buf, buf.length, address, 4446);
@@ -170,21 +177,28 @@ public class SimpleWebServer {
 
     private static final java.util.Map<String, String> pendingCommands = new java.util.concurrent.ConcurrentHashMap<>();
 
+    public static void queueCommand(String nodeId, String cmd) {
+        pendingCommands.put(nodeId, cmd);
+    }
+
     static class WebReportHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange t) throws IOException {
-            String query = t.getRequestURI().getQuery();
+            String query = t.getRequestURI().getRawQuery();
             if (query == null) {
                 send(t, 400, "{\"error\":\"Missing params\"}");
                 return;
             }
 
-            // Simple parser for: id=XX&v=YY&p=ZZ&r=RR
             java.util.Map<String, String> params = new java.util.HashMap<>();
             for (String pair : query.split("&")) {
                 String[] kv = pair.split("=");
-                if (kv.length > 1)
-                    params.put(kv[0], kv[1]);
+                try {
+                    String key = java.net.URLDecoder.decode(kv[0], "UTF-8");
+                    String val = kv.length > 1 ? java.net.URLDecoder.decode(kv[1], "UTF-8") : "";
+                    params.put(key, val);
+                } catch (Exception e) {
+                }
             }
 
             String id = params.get("id");
@@ -192,23 +206,36 @@ public class SimpleWebServer {
             String p = params.get("p");
             String r = params.get("r");
 
+            System.out.println("[WebAPI] Received report: id=" + id + ", p=" + p + ", v=" + v);
+
             if (id == null || v == null) {
                 send(t, 400, "{\"error\":\"Missing required fields\"}");
                 return;
             }
 
             try (Connection conn = DBConnection.getConnection()) {
+                // Manual Confirmation Rule: Don't auto-resolve from OUTAGE to ONLINE
+                String currentStatus = "ONLINE";
+                try (java.sql.PreparedStatement psCheck = conn
+                        .prepareStatement("SELECT status FROM nodes WHERE node_id = ?")) {
+                    psCheck.setString(1, id);
+                    try (java.sql.ResultSet rs = psCheck.executeQuery()) {
+                        if (rs.next())
+                            currentStatus = rs.getString("status");
+                    }
+                }
+
                 String status = "ONLINE";
-                if ("OUTAGE".equalsIgnoreCase(p) || "OFFLINE".equalsIgnoreCase(p))
+                if ("OFFLINE".equalsIgnoreCase(p)) {
                     status = "OFFLINE";
+                } else if ("OUTAGE".equals(currentStatus) || "ISSUE".equals(currentStatus)) {
+                    status = currentStatus; // Only keep grid-level outages sticky
+                }
 
                 String display = v + "V | " + (r != null ? r : "Unknown");
                 String sql = "INSERT INTO nodes (node_id, region, last_seen, last_power_state, last_load_percent, transformer_health, status) "
-                        +
-                        "VALUES (?, ?, NOW(), ?, 0, ?, ?) " +
-                        "ON DUPLICATE KEY UPDATE region=VALUES(region), last_seen=NOW(), last_power_state=VALUES(last_power_state), "
-                        +
-                        "transformer_health=VALUES(transformer_health), status=VALUES(status)";
+                        + "VALUES (?, ?, NOW(), ?, 0, ?, ?) "
+                        + "ON DUPLICATE KEY UPDATE region=?, last_seen=NOW(), last_power_state=?, transformer_health=?, status=?";
 
                 try (java.sql.PreparedStatement ps = conn.prepareStatement(sql)) {
                     ps.setString(1, id);
@@ -216,8 +243,19 @@ public class SimpleWebServer {
                     ps.setString(3, p != null ? p : "NORMAL");
                     ps.setString(4, display);
                     ps.setString(5, status);
+
+                    ps.setString(6, r != null ? r : "Unknown");
+                    ps.setString(7, p != null ? p : "NORMAL");
+                    ps.setString(8, display);
+                    ps.setString(9, status);
+
                     ps.executeUpdate();
                 }
+
+                // Construct sync message for peers
+                String syncMsg = "REPORT|" + id + "|" + v + "|" + (p != null ? p : "NORMAL") + "|"
+                        + (r != null ? r : "Unknown");
+                HeadlessServer.broadcastSync(syncMsg);
 
                 // Check for confirmed restoration
                 String cmd = params.get("cmd");
@@ -227,6 +265,9 @@ public class SimpleWebServer {
                         ps.setString(1, id);
                         ps.executeUpdate();
                     }
+                    // IMPORTANT: Use the space-separated or pipe format expected by handleMessage
+                    HeadlessServer.broadcastSync("CONFIRM_RESOLVED|" + id);
+                    System.out.println("[WebAPI] Restoration CONFIRMED for district " + id);
                 }
 
                 send(t, 200, "{\"status\":\"ok\"}");
@@ -263,8 +304,9 @@ public class SimpleWebServer {
                 handler.sendMessage("SOLVED_CHECK");
                 send(t, 200, "{\"status\":\"sent\"}");
             } else {
-                // If not TCP, mark for Web Simulator
-                pendingCommands.put(id, "SOLVED_CHECK");
+                // Not local? Queue for Web Simulator AND broadcast to peers
+                queueCommand(id, "SOLVED_CHECK");
+                HeadlessServer.broadcastSync("VERIFY_RELAY|" + id);
                 send(t, 200, "{\"status\":\"queued_web\"}");
             }
         }
@@ -288,9 +330,22 @@ public class SimpleWebServer {
             String cmd = "NONE";
             if (id != null && pendingCommands.containsKey(id)) {
                 cmd = pendingCommands.remove(id);
+                System.out.println("[WebAPI] Command " + cmd + " polled by simulator " + id);
             }
 
             String json = "{\"command\":\"" + cmd + "\"}";
+            t.getResponseHeaders().set("Content-Type", "application/json");
+            t.sendResponseHeaders(200, json.length());
+            t.getResponseBody().write(json.getBytes());
+            t.getResponseBody().close();
+        }
+    }
+
+    static class StatsHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange t) throws IOException {
+            String json = String.format("{\"serverId\": %d, \"isLeader\": %b, \"port\": %d}",
+                    HeadlessServer.getServerId(), HeadlessServer.isLeader(), HeadlessServer.getServerPort());
             t.getResponseHeaders().set("Content-Type", "application/json");
             t.sendResponseHeaders(200, json.length());
             t.getResponseBody().write(json.getBytes());

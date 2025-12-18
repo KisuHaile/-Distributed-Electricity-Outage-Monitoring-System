@@ -3,11 +3,7 @@ package com.electricity.server;
 import java.io.*;
 import java.net.*;
 import java.sql.*;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
-
 import com.electricity.db.DBConnection;
-// import com.electricity.service.ElectionManager; // Removed
 
 public class ClientHandler implements Runnable {
 
@@ -15,8 +11,8 @@ public class ClientHandler implements Runnable {
     private int clientNumber;
     private String nodeId;
     private PrintWriter out;
+    private boolean isServerPeer = false;
     private static final java.util.Map<String, ClientHandler> activeHandlers = new java.util.concurrent.ConcurrentHashMap<>();
-    private static final DateTimeFormatter DATETIME_PARSER = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss");
 
     public ClientHandler(Socket socket, int clientNumber) {
         this.clientSocket = socket;
@@ -42,6 +38,12 @@ public class ClientHandler implements Runnable {
             // 1. SECURITY: Authentication handshake
             String authLine = in.readLine();
 
+            if (authLine != null && authLine.equals("AUTH|SERVER_2025")) {
+                this.isServerPeer = true;
+                handleServerSession(in);
+                return;
+            }
+
             if (authLine == null || !authLine.equals("AUTH|GRID_SEC_2025")) {
                 // For now, only accept Grid Security Token
                 System.out.println("[Client #" + clientNumber + "] Authentication Failed. Closing.");
@@ -49,7 +51,7 @@ public class ClientHandler implements Runnable {
                 return; // Close connection
             } else {
                 out.println("AUTH_OK");
-                System.out.println("[Client #" + clientNumber + "] Authenticated successfully.");
+                System.out.println("[Client #" + clientNumber + "] Authenticated successfully. Monitoring active.");
             }
 
             String line;
@@ -72,13 +74,29 @@ public class ClientHandler implements Runnable {
         }
     }
 
+    private void handleServerSession(BufferedReader in) throws IOException {
+        String line;
+        while ((line = in.readLine()) != null) {
+            if (line.startsWith("SYNC|")) {
+                String sub = line.substring(5);
+                System.out.println("[Sync-In] Processing sync message: " + sub);
+                handleMessage(sub);
+            }
+        }
+    }
+
     private void updateNodeStatus(String id, String status) {
+        System.out.println("[HQ] Local status update for " + id + " to " + status);
         try (Connection conn = DBConnection.getConnection()) {
             String sql = "UPDATE nodes SET status = ? WHERE node_id = ?";
             try (PreparedStatement ps = conn.prepareStatement(sql)) {
                 ps.setString(1, status);
                 ps.setString(2, id);
                 ps.executeUpdate();
+            }
+            // Sync this connection status change to other servers
+            if (!isServerPeer) {
+                HeadlessServer.broadcastSync("STATUS|" + id + "|" + status);
             }
         } catch (SQLException e) {
             System.err.println("Failed to update status for " + id + ": " + e.getMessage());
@@ -95,13 +113,54 @@ public class ClientHandler implements Runnable {
         String type = parts[0].trim().toUpperCase();
         try {
             switch (type) {
+                case "JOIN":
+                    // JOIN|ServerId|IP|Port
+                    int sid = Integer.parseInt(parts[1]);
+                    String sip = parts[2];
+                    int sport = Integer.parseInt(parts[3]);
+
+                    if ("0".equals(sip) || "localhost".equals(sip)) {
+                        sip = clientSocket.getInetAddress().getHostAddress();
+                    }
+
+                    System.out
+                            .println("[Handshake] Received JOIN from Server #" + sid + " (" + sip + ":" + sport + ")");
+                    // Register and trigger full sync back
+                    HeadlessServer.registerManualPeer(sid, sip, sport, true);
+                    return "OK|JOINED";
                 case "REPORT":
-                    return handleReport(parts);
+                    String res = handleReport(parts);
+                    if (!isServerPeer && res.startsWith("OK"))
+                        HeadlessServer.broadcastSync(msg);
+                    return res;
                 case "OUTAGE":
-                    return handleOutage(parts);
-                // Legacy support if needed, but REPORT is new standard
+                    String res2 = handleOutage(parts);
+                    if (!isServerPeer && res2.startsWith("OK"))
+                        HeadlessServer.broadcastSync(msg);
+                    return res2;
                 case "CONFIRM_RESOLVED":
-                    return handleConfirmation(parts);
+                    String res3 = handleConfirmation(parts);
+                    if (!isServerPeer && res3.startsWith("OK"))
+                        HeadlessServer.broadcastSync(msg);
+                    return res3;
+                case "STATUS":
+                    if (parts.length >= 3) {
+                        updateNodeStatus(parts[1], parts[2]);
+                    }
+                    return "OK";
+                case "VERIFY_RELAY":
+                    if (parts.length >= 2) {
+                        String vid = parts[1];
+                        ClientHandler vh = getHandler(vid);
+                        if (vh != null) {
+                            vh.sendMessage("SOLVED_CHECK");
+                            System.out.println("[Sync-In] Relay: Sent SOLVED_CHECK to local TCP client " + vid);
+                        } else {
+                            // Also queue for web simulator in case it's polling THIS server
+                            com.electricity.server.web.SimpleWebServer.queueCommand(vid, "SOLVED_CHECK");
+                        }
+                    }
+                    return "OK";
                 default:
                     return "ERR|UnknownType";
             }
@@ -115,12 +174,17 @@ public class ClientHandler implements Runnable {
         if (p.length < 2)
             return "ERR|CONFIRM|BadFormat";
         String nodeId = p[1];
-        System.out.println("[HQ] OUTAGE RESOLVED CONFIRMATION received from " + nodeId);
+        System.out.println("[Sync-In] >>> CONFIRMATION RECEIVED for District " + nodeId);
         try (Connection conn = DBConnection.getConnection()) {
             String update = "UPDATE nodes SET status='ONLINE', last_power_state='NORMAL', last_seen=NOW() WHERE node_id=?";
             try (PreparedStatement ps = conn.prepareStatement(update)) {
                 ps.setString(1, nodeId);
-                ps.executeUpdate();
+                int count = ps.executeUpdate();
+                if (count > 0) {
+                    System.out.println("[Sync-DB] District " + nodeId + " status RESTORED to ONLINE via confirmation.");
+                } else {
+                    System.out.println("[Sync-DB] WARNING: No node found with ID " + nodeId + " to confirm.");
+                }
             }
             return "OK|STATUS_RESTORED";
         } catch (SQLException e) {
@@ -134,11 +198,13 @@ public class ClientHandler implements Runnable {
             return "ERR|RPT|BadFormat";
 
         String nodeId = p[1];
-        if (this.nodeId == null || !this.nodeId.equals(nodeId)) {
-            if (this.nodeId != null)
-                activeHandlers.remove(this.nodeId);
-            this.nodeId = nodeId;
-            activeHandlers.put(nodeId, this);
+        if (!isServerPeer) {
+            if (this.nodeId == null || !this.nodeId.equals(nodeId)) {
+                if (this.nodeId != null)
+                    activeHandlers.remove(this.nodeId);
+                this.nodeId = nodeId;
+                activeHandlers.put(nodeId, this);
+            }
         }
         double voltage = Double.parseDouble(p[2]);
         String powerState = p[3];
@@ -152,47 +218,70 @@ public class ClientHandler implements Runnable {
 
         System.out.println("[HQ] Report from " + nodeId + " (" + region + "): " + voltage + "V, " + powerState);
 
-        // Determine status based on power state
-        String status = "ONLINE";
-        if ("OUTAGE".equalsIgnoreCase(powerState) || "OFF".equalsIgnoreCase(powerState)
-                || "DOWN".equalsIgnoreCase(powerState)) {
-            status = "OFFLINE";
+        // Determine status:
+        // Logic: If power is OFFLINE, status is OFFLINE.
+        // If power is NORMAL, only set status to ONLINE if it's NOT currently in an
+        // OUTAGE.
+        String statusToUpdate = "ONLINE";
+        if ("OFFLINE".equalsIgnoreCase(powerState)) {
+            statusToUpdate = "OFFLINE";
         }
 
         try (Connection conn = DBConnection.getConnection()) {
+            // Check current status to respect "Manual Confirmation" requirement
+            String currentStatus = "ONLINE";
+            try (PreparedStatement psCheck = conn.prepareStatement("SELECT status FROM nodes WHERE node_id = ?")) {
+                psCheck.setString(1, nodeId);
+                try (ResultSet rs = psCheck.executeQuery()) {
+                    if (rs.next()) {
+                        currentStatus = rs.getString("status");
+                    }
+                }
+            }
+
+            // If power is back but node was in OUTAGE/ISSUE, keep it until confirmed
+            // NOTE: We REMOVED 'OFFLINE' from here so reconnecting clients show up
+            // immediately
+            if ("ONLINE".equals(statusToUpdate) && ("OUTAGE".equals(currentStatus) || "ISSUE".equals(currentStatus))) {
+                // If it was OFFLINE/OUTAGE, we don't automatically jump to ONLINE
+                // We keep the last known status to force the user to "Check Again & Confirm"
+                statusToUpdate = currentStatus;
+            }
+
             String upsert = "INSERT INTO nodes (node_id, region, last_seen, last_power_state, last_load_percent, transformer_health, status) "
-                    +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?) " +
-                    "ON DUPLICATE KEY UPDATE region=VALUES(region), last_seen=VALUES(last_seen), last_power_state=VALUES(last_power_state), "
-                    +
-                    "transformer_health=VALUES(transformer_health), status=VALUES(status)";
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                    + "ON DUPLICATE KEY UPDATE region=?, last_seen=?, last_power_state=?, transformer_health=?, status=?";
 
             try (PreparedStatement ps = conn.prepareStatement(upsert)) {
                 Timestamp now = new Timestamp(logicalTime);
+                // Insert part
                 ps.setString(1, nodeId);
                 ps.setString(2, region);
                 ps.setTimestamp(3, now);
                 ps.setString(4, powerState);
                 ps.setInt(5, 0);
-                ps.setString(6, displayInfo); // Stores Voltage | Region
-                ps.setString(7, status); // Status (ONLINE/OFFLINE)
-                ps.executeUpdate();
+                ps.setString(6, displayInfo);
+                ps.setString(7, statusToUpdate);
+                // Update part
+                ps.setString(8, region);
+                ps.setTimestamp(9, now);
+                ps.setString(10, powerState);
+                ps.setString(11, displayInfo);
+                ps.setString(12, statusToUpdate);
+
+                int rows = ps.executeUpdate();
+                if (isServerPeer) {
+                    System.out.println("[Sync-DB] Successfully updated " + nodeId + " (Rows affected: " + rows + ")");
+                }
+                return "OK|ACK_REPORT";
             }
-            return "OK|ACK_REPORT";
-        } catch (SQLException e) {
-            System.err.println("Database Write Error: " + e.getMessage());
+        } catch (java.sql.SQLException e) {
+            System.err.println("[DB-ERROR] Failed to save sync data for " + nodeId + ": " + e.getMessage());
+            if (isServerPeer) {
+                e.printStackTrace(); // Show full trace for inter-server errors
+            }
             return "ERR|DB_ERROR";
         }
-    }
-
-    private String handleReportLegacy(String[] p) {
-        // Fallback for old clients if any
-        if (p.length < 5)
-            return "ERR|HB|BadFormat";
-        String nodeId = p[1];
-        // p[2] = powerState, p[3] = load
-        String msg = String.format("REPORT|%s|220.0|%s", nodeId, p[2]);
-        return handleReport(msg.split("\\|"));
     }
 
     private String handleOutage(String[] p) {

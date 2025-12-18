@@ -7,13 +7,13 @@ DROP TABLE IF EXISTS events;
 DROP TABLE IF EXISTS nodes;
 
 CREATE TABLE IF NOT EXISTS nodes (
-    node_id VARCHAR(255) PRIMARY KEY,
-    region VARCHAR(255),
+    node_id VARCHAR(100) PRIMARY KEY,
+    region VARCHAR(100),
     last_seen TIMESTAMP NULL,
-    last_power_state VARCHAR(20),
+    last_power_state VARCHAR(10),
     last_load_percent INT,
-    transformer_health VARCHAR(255),
-    status VARCHAR(50)
+    transformer_health VARCHAR(100),
+    status VARCHAR(20)
 );
 
 CREATE TABLE IF NOT EXISTS events (

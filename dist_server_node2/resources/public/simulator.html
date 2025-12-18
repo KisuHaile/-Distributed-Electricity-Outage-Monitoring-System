@@ -96,7 +96,9 @@
 
             <p id="hq-msg"
                 style="margin-top: 1.5rem; text-align: center; font-size: 0.9rem; color: #eab308; display: none;">
-                🛰️ <b>HQ VERIFICATION:</b> System is checking if power is back...
+                ⚠️ <b>HQ REQUEST:</b> Please confirm if the problem is solved.
+                <button onclick="confirmResolved()" class="btn-action"
+                    style="margin-top: 10px; width: 100%; height: auto; padding: 10px;">Yes, Problem Solved</button>
             </p>
         </div>
     </div>
@@ -188,22 +190,7 @@
                 const res = await fetch(`/api/poll?id=${id}`);
                 const data = await res.json();
                 if (data.command === 'SOLVED_CHECK') {
-                    // AUTO-CONFIRMATION LOGIC:
-                    // Only confirm if voltage is actually normal (>200V)
-                    if (config.voltage >= 200) {
-                        document.getElementById('hq-msg').style.display = 'block';
-                        document.getElementById('hq-msg').innerHTML = "✅ <b>AUTO-CONFIRMED:</b> Grid levels are back to normal.";
-                        sendReport('CONFIRM_RESOLVED');
-                        setTimeout(() => {
-                            document.getElementById('hq-msg').style.display = 'none';
-                        }, 5000);
-                    } else {
-                        document.getElementById('hq-msg').style.display = 'block';
-                        document.getElementById('hq-msg').innerHTML = "⚠️ <b>HQ REQUEST:</b> Power is still unstable (Current: " + config.voltage + "V). Fix it now!";
-                        setTimeout(() => {
-                           document.getElementById('hq-msg').style.display = 'none';
-                        }, 5000);
-                    }
+                    document.getElementById('hq-msg').style.display = 'block';
                 }
             } catch (e) { }
         }
