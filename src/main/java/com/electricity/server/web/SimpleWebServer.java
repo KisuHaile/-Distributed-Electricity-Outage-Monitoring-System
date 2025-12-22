@@ -214,15 +214,41 @@ public class SimpleWebServer {
             }
 
             try (Connection conn = DBConnection.getConnection()) {
-                // Manual Confirmation Rule: Don't auto-resolve from OUTAGE to ONLINE
+                // Security Check: Is node authorized? (Both ID and Region must match)
+                try (java.sql.PreparedStatement psAuth = conn
+                        .prepareStatement("SELECT 1 FROM nodes WHERE node_id = ? AND region = ?")) {
+                    psAuth.setString(1, id);
+                    psAuth.setString(2, r != null ? r : "Unknown");
+                    try (java.sql.ResultSet rs = psAuth.executeQuery()) {
+                        if (!rs.next()) {
+                            System.out.println("[WebAPI-Security] Rejected unauthorized node/region combo: ID=" + id
+                                    + ", Region=" + r);
+                            send(t, 403, "{\"error\":\"Unauthorized Credentials (ID or Region mismatch)\"}");
+                            return;
+                        }
+                    }
+                }
+
+                // Detect Power State Change for Event Logging
+                String oldPowerState = "UNKNOWN";
                 String currentStatus = "ONLINE";
                 try (java.sql.PreparedStatement psCheck = conn
-                        .prepareStatement("SELECT status FROM nodes WHERE node_id = ?")) {
+                        .prepareStatement("SELECT status, last_power_state FROM nodes WHERE node_id = ?")) {
                     psCheck.setString(1, id);
                     try (java.sql.ResultSet rs = psCheck.executeQuery()) {
-                        if (rs.next())
+                        if (rs.next()) {
                             currentStatus = rs.getString("status");
+                            oldPowerState = rs.getString("last_power_state");
+                        }
                     }
+                }
+
+                String eventType = com.electricity.db.EventLogger.determineEventType(p != null ? p : "NORMAL",
+                        oldPowerState);
+                if (eventType != null) {
+                    String metadata = String.format("WebReport - Voltage: %sV, Previous: %s, Region: %s", v,
+                            oldPowerState, r);
+                    com.electricity.db.EventLogger.logEvent(id, eventType, metadata);
                 }
 
                 String status = "ONLINE";
@@ -233,21 +259,15 @@ public class SimpleWebServer {
                 }
 
                 String display = v + "V | " + (r != null ? r : "Unknown");
-                String sql = "INSERT INTO nodes (node_id, region, last_seen, last_power_state, last_load_percent, transformer_health, status) "
-                        + "VALUES (?, ?, NOW(), ?, 0, ?, ?) "
-                        + "ON DUPLICATE KEY UPDATE region=?, last_seen=NOW(), last_power_state=?, transformer_health=?, status=?";
+                String sql = "UPDATE nodes SET region=?, last_seen=NOW(), last_power_state=?, transformer_health=?, status=? "
+                        + "WHERE node_id=?";
 
                 try (java.sql.PreparedStatement ps = conn.prepareStatement(sql)) {
-                    ps.setString(1, id);
-                    ps.setString(2, r != null ? r : "Unknown");
-                    ps.setString(3, p != null ? p : "NORMAL");
-                    ps.setString(4, display);
-                    ps.setString(5, status);
-
-                    ps.setString(6, r != null ? r : "Unknown");
-                    ps.setString(7, p != null ? p : "NORMAL");
-                    ps.setString(8, display);
-                    ps.setString(9, status);
+                    ps.setString(1, r != null ? r : "Unknown");
+                    ps.setString(2, p != null ? p : "NORMAL");
+                    ps.setString(3, display);
+                    ps.setString(4, status);
+                    ps.setString(5, id);
 
                     ps.executeUpdate();
                 }
@@ -265,6 +285,8 @@ public class SimpleWebServer {
                         ps.setString(1, id);
                         ps.executeUpdate();
                     }
+                    com.electricity.db.EventLogger.logEvent(id, "MANUAL_RESTORE_CONFIRMED",
+                            "Admin confirmed grid restoration via Dashboard.");
                     // IMPORTANT: Use the space-separated or pipe format expected by handleMessage
                     HeadlessServer.broadcastSync("CONFIRM_RESOLVED|" + id);
                     System.out.println("[WebAPI] Restoration CONFIRMED for district " + id);

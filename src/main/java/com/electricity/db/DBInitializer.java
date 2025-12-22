@@ -8,9 +8,17 @@ import java.nio.charset.StandardCharsets;
 
 public class DBInitializer {
     public static void main(String[] args) {
+        String host = "localhost";
+        if (args.length > 0)
+            host = args[0];
+        initialize(host);
+    }
+
+    public static void initialize(String dbHost) {
         try {
-            Connection conn = java.sql.DriverManager.getConnection(
-                    "jdbc:mysql://localhost:3310/?allowMultiQueries=true&serverTimezone=UTC", "root", "");
+            // First connect without database to ensure it exists
+            String url = "jdbc:mysql://" + dbHost + ":3310/?allowMultiQueries=true&serverTimezone=UTC";
+            Connection conn = java.sql.DriverManager.getConnection(url, "root", "");
             Statement stmt = conn.createStatement();
 
             InputStream is = DBInitializer.class.getClassLoader().getResourceAsStream("schema.sql");
@@ -30,8 +38,9 @@ public class DBInitializer {
             try {
                 System.out.println("Granting remote access...");
                 try {
-                  stmt.execute("CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED BY ''");
-                } catch(Exception ex) {}
+                    stmt.execute("CREATE USER IF NOT EXISTS 'root'@'%' IDENTIFIED BY ''");
+                } catch (Exception ex) {
+                }
                 stmt.execute("GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION");
                 stmt.execute("FLUSH PRIVILEGES");
                 System.out.println("Remote access granted for root@%");
@@ -42,7 +51,7 @@ public class DBInitializer {
             System.out.println("Database initialized successfully.");
             conn.close();
         } catch (Exception e) {
-            e.printStackTrace();
+            System.err.println("Database initialization failed: " + e.getMessage());
         }
     }
 }

@@ -74,6 +74,9 @@ public class HeadlessServer {
         System.out.println("DB Host: " + dbHost);
 
         // 1. Initialize DB & Check Status
+        System.out.println("[DB] Auto-initializing database if needed...");
+        com.electricity.db.DBInitializer.initialize(dbHost);
+
         DBConnection.configure(dbHost);
         try (java.sql.Connection conn = DBConnection.getConnection();
                 java.sql.Statement stmt = conn.createStatement();
@@ -83,13 +86,17 @@ public class HeadlessServer {
                         "[DB-Warmup] Connection Successful. Local database contains " + rs.getInt(1) + " nodes.");
             }
         } catch (Exception e) {
-            System.err.println("[DB-Warmup] WARNING: Could not query local database. Ensure 'init_db.bat' was run.");
+            System.err.println("[DB-Warmup] WARNING: Could not query local database.");
             System.err.println("[DB-Warmup] Error: " + e.getMessage());
         }
 
         // 2. Start Web Server (The Browser Interface)
         SimpleWebServer webServer = new SimpleWebServer(webPort);
         webServer.start();
+
+        // 2.5 Log Startup Event
+        com.electricity.db.EventLogger.logEvent("SYSTEM", "SERVER_STARTUP",
+                "Server ID " + id + " started on port " + port);
 
         // 3. Start Core Server Logic
         startServerThreads(id, port, peerConfig);

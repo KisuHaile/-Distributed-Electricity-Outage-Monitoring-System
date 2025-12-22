@@ -182,6 +182,8 @@ public class ClientHandler implements Runnable {
                 int count = ps.executeUpdate();
                 if (count > 0) {
                     System.out.println("[Sync-DB] District " + nodeId + " status RESTORED to ONLINE via confirmation.");
+                    com.electricity.db.EventLogger.logEvent(nodeId, "MANUAL_RESTORE_CONFIRMED",
+                            "Admin/Client confirmed grid restoration.");
                 } else {
                     System.out.println("[Sync-DB] WARNING: No node found with ID " + nodeId + " to confirm.");
                 }
@@ -193,93 +195,97 @@ public class ClientHandler implements Runnable {
     }
 
     private String handleReport(String[] p) {
-        // REPORT|NodeId(DistrictID)|Voltage|PowerState|Region
+        // REPORT|NodeId|Voltage|PowerState|Region
         if (p.length < 4)
             return "ERR|RPT|BadFormat";
 
-        String nodeId = p[1];
-        if (!isServerPeer) {
-            if (this.nodeId == null || !this.nodeId.equals(nodeId)) {
-                if (this.nodeId != null)
-                    activeHandlers.remove(this.nodeId);
-                this.nodeId = nodeId;
-                activeHandlers.put(nodeId, this);
-            }
-        }
+        String incomingNodeId = p[1];
         double voltage = Double.parseDouble(p[2]);
         String powerState = p[3];
         String region = (p.length > 4) ? p[4] : "Unknown";
 
-        // Storing Voltage AND Region in 'transformer_health' column for display
-        // Format: "220.5V | Addis Ababa"
-        String displayInfo = String.format("%.1fV | %s", voltage, region);
+        if (!isServerPeer) {
+            // Check if node is authorized (ID and Region must match)
+            try (Connection conn = DBConnection.getConnection();
+                    PreparedStatement ps = conn
+                            .prepareStatement("SELECT 1 FROM nodes WHERE node_id = ? AND region = ?")) {
+                ps.setString(1, incomingNodeId);
+                ps.setString(2, region);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) {
+                        System.out.println("[Security] Rejected node: ID=" + incomingNodeId + ", Region=" + region);
+                        return "ERR|UNAUTHORIZED_CREDENTIALS";
+                    }
+                }
+            } catch (SQLException e) {
+                return "ERR|DB_VERIFY_FAILED";
+            }
 
+            if (this.nodeId == null || !this.nodeId.equals(incomingNodeId)) {
+                if (this.nodeId != null)
+                    activeHandlers.remove(this.nodeId);
+                this.nodeId = incomingNodeId;
+                activeHandlers.put(incomingNodeId, this);
+            }
+        }
+
+        String displayInfo = String.format("%.1fV | %s", voltage, region);
         long logicalTime = System.currentTimeMillis();
 
-        System.out.println("[HQ] Report from " + nodeId + " (" + region + "): " + voltage + "V, " + powerState);
+        System.out.println("[HQ] Report from " + incomingNodeId + " (" + region + "): " + voltage + "V, " + powerState);
 
-        // Determine status:
-        // Logic: If power is OFFLINE, status is OFFLINE.
-        // If power is NORMAL, only set status to ONLINE if it's NOT currently in an
-        // OUTAGE.
         String statusToUpdate = "ONLINE";
         if ("OFFLINE".equalsIgnoreCase(powerState)) {
             statusToUpdate = "OFFLINE";
         }
 
         try (Connection conn = DBConnection.getConnection()) {
-            // Check current status to respect "Manual Confirmation" requirement
             String currentStatus = "ONLINE";
-            try (PreparedStatement psCheck = conn.prepareStatement("SELECT status FROM nodes WHERE node_id = ?")) {
-                psCheck.setString(1, nodeId);
+            String oldPowerState = "UNKNOWN";
+            try (PreparedStatement psCheck = conn
+                    .prepareStatement("SELECT status, last_power_state FROM nodes WHERE node_id = ?")) {
+                psCheck.setString(1, incomingNodeId);
                 try (ResultSet rs = psCheck.executeQuery()) {
                     if (rs.next()) {
                         currentStatus = rs.getString("status");
+                        oldPowerState = rs.getString("last_power_state");
                     }
                 }
             }
 
-            // If power is back but node was in OUTAGE/ISSUE, keep it until confirmed
-            // NOTE: We REMOVED 'OFFLINE' from here so reconnecting clients show up
-            // immediately
+            // Detect Power State Change for Event Logging
+            String eventType = com.electricity.db.EventLogger.determineEventType(powerState, oldPowerState);
+            if (eventType != null) {
+                String metadata = String.format("Voltage: %.1fV, Previous: %s, Region: %s", voltage, oldPowerState,
+                        region);
+                com.electricity.db.EventLogger.logEvent(incomingNodeId, eventType, metadata);
+            }
+
             if ("ONLINE".equals(statusToUpdate) && ("OUTAGE".equals(currentStatus) || "ISSUE".equals(currentStatus))) {
-                // If it was OFFLINE/OUTAGE, we don't automatically jump to ONLINE
-                // We keep the last known status to force the user to "Check Again & Confirm"
                 statusToUpdate = currentStatus;
             }
 
-            String upsert = "INSERT INTO nodes (node_id, region, last_seen, last_power_state, last_load_percent, transformer_health, status) "
-                    + "VALUES (?, ?, ?, ?, ?, ?, ?) "
-                    + "ON DUPLICATE KEY UPDATE region=?, last_seen=?, last_power_state=?, transformer_health=?, status=?";
+            String update = "UPDATE nodes SET region=?, last_seen=?, last_power_state=?, transformer_health=?, status=? "
+                    + "WHERE node_id=?";
 
-            try (PreparedStatement ps = conn.prepareStatement(upsert)) {
+            try (PreparedStatement ps = conn.prepareStatement(update)) {
                 Timestamp now = new Timestamp(logicalTime);
-                // Insert part
-                ps.setString(1, nodeId);
-                ps.setString(2, region);
-                ps.setTimestamp(3, now);
-                ps.setString(4, powerState);
-                ps.setInt(5, 0);
-                ps.setString(6, displayInfo);
-                ps.setString(7, statusToUpdate);
-                // Update part
-                ps.setString(8, region);
-                ps.setTimestamp(9, now);
-                ps.setString(10, powerState);
-                ps.setString(11, displayInfo);
-                ps.setString(12, statusToUpdate);
+                ps.setString(1, region);
+                ps.setTimestamp(2, now);
+                ps.setString(3, powerState);
+                ps.setString(4, displayInfo);
+                ps.setString(5, statusToUpdate);
+                ps.setString(6, incomingNodeId);
 
                 int rows = ps.executeUpdate();
                 if (isServerPeer) {
-                    System.out.println("[Sync-DB] Successfully updated " + nodeId + " (Rows affected: " + rows + ")");
+                    System.out.println(
+                            "[Sync-DB] Successfully updated " + incomingNodeId + " (Rows affected: " + rows + ")");
                 }
                 return "OK|ACK_REPORT";
             }
         } catch (java.sql.SQLException e) {
-            System.err.println("[DB-ERROR] Failed to save sync data for " + nodeId + ": " + e.getMessage());
-            if (isServerPeer) {
-                e.printStackTrace(); // Show full trace for inter-server errors
-            }
+            System.err.println("[DB-ERROR] Failed to save sync data for " + incomingNodeId + ": " + e.getMessage());
             return "ERR|DB_ERROR";
         }
     }
@@ -287,31 +293,35 @@ public class ClientHandler implements Runnable {
     private String handleOutage(String[] p) {
         if (p.length < 6)
             return "ERR|OUTAGE|BadFormat";
-        // OUTAGE|eventId|nodeId|eventType|timestamp|meta
-        // Just log and store. Server is authority.
-        String eventId = p[1];
-        String nodeId = p[2];
+        // String eventId = p[1]; // Unused
+        String incomingNodeId = p[2];
         String type = p[3];
 
-        System.out.println("[Central Authority] ALERT: District " + nodeId + " reported " + type);
+        if (!isServerPeer) {
+            try (Connection conn = DBConnection.getConnection();
+                    PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM nodes WHERE node_id = ?")) {
+                ps.setString(1, incomingNodeId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    if (!rs.next()) {
+                        System.out.println("[Security] Rejected OUTAGE from unauthorized node: " + incomingNodeId);
+                        return "ERR|UNAUTHORIZED_NODE";
+                    }
+                }
+            } catch (SQLException e) {
+                return "ERR|DB_VERIFY_FAILED";
+            }
+        }
+
+        System.out.println("[Central Authority] ALERT: District " + incomingNodeId + " reported " + type);
 
         try (Connection conn = DBConnection.getConnection()) {
-            // Logic simplified: Just insert event
-            String insertEvent = "INSERT INTO events (event_id, node_id, event_type, timestamp, metadata) VALUES (?, ?, ?, ?, ?)";
-            try (PreparedStatement ps = conn.prepareStatement(insertEvent)) {
-                ps.setString(1, eventId);
-                ps.setString(2, nodeId);
-                ps.setString(3, type);
-                ps.setTimestamp(4, new Timestamp(System.currentTimeMillis()));
-                ps.setString(5, p[5]);
-                ps.executeUpdate();
-            }
+            // Log via Central Logger
+            com.electricity.db.EventLogger.logEvent(incomingNodeId, type, "Explicit Outage Report: " + p[5]);
 
-            // Update node state
             if (type.contains("START"))
-                updateNodeState(conn, nodeId, "OFF");
+                updateNodeState(conn, incomingNodeId, "OFFLINE");
             else if (type.contains("END"))
-                updateNodeState(conn, nodeId, "NORMAL");
+                updateNodeState(conn, incomingNodeId, "NORMAL");
 
             return "OK|ACK_OUTAGE";
         } catch (SQLException e) {

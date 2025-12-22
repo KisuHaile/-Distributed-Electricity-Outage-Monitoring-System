@@ -1,224 +1,361 @@
 <!DOCTYPE html>
 <html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>District Web Simulator</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css" />
     <style>
-        .sim-container {
-            max-width: 500px;
-            margin: 40px auto;
-            padding: 2rem;
-        }
+      .sim-container {
+        max-width: 500px;
+        margin: 40px auto;
+        padding: 2rem;
+      }
 
-        .control-group {
-            margin-bottom: 2rem;
-            background: rgba(255, 255, 255, 0.05);
-            padding: 1.5rem;
-            border-radius: 12px;
-        }
+      .control-group {
+        margin-bottom: 2rem;
+        background: rgba(255, 255, 255, 0.05);
+        padding: 1.5rem;
+        border-radius: 12px;
+      }
 
-        .v-display {
-            font-size: 3rem;
-            font-weight: 700;
-            text-align: center;
-            margin: 1rem 0;
-            color: #22c55e;
-        }
+      .v-display {
+        font-size: 3rem;
+        font-weight: 700;
+        text-align: center;
+        margin: 1rem 0;
+        color: #22c55e;
+      }
 
-        .btn-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
+      .btn-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+      }
 
-        input[type="range"] {
-            width: 100%;
-            margin: 10px 0;
-        }
+      input[type="range"] {
+        width: 100%;
+        margin: 10px 0;
+      }
 
-        .status-pill {
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.8rem;
-            background: rgba(34, 197, 94, 0.2);
-            color: #22c55e;
-        }
+      .status-pill {
+        padding: 5px 15px;
+        border-radius: 20px;
+        font-size: 0.8rem;
+        background: rgba(34, 197, 94, 0.2);
+        color: #22c55e;
+      }
     </style>
-</head>
+  </head>
 
-<body class="dark-theme">
+  <body class="dark-theme">
     <div class="sim-container">
-        <header style="text-align: center; margin-bottom: 2rem;">
-            <h1>🕹️ District Simulator</h1>
-            <button onclick="disconnect()" id="disconnect-btn" class="btn-action"
-                style="display:none; padding: 5px 15px; height: auto; font-size: 0.8rem; background: #ef4444;">🔴
-                Disconnect</button>
-        </header>
+      <header style="text-align: center; margin-bottom: 2rem">
+        <h1>🕹️ District Simulator</h1>
+        <button
+          onclick="disconnect()"
+          id="disconnect-btn"
+          class="btn-action"
+          style="
+            display: none;
+            padding: 5px 15px;
+            height: auto;
+            font-size: 0.8rem;
+            background: #ef4444;
+          "
+        >
+          🔴 Disconnect
+        </button>
+      </header>
 
-        <div id="setup-area" class="card control-group">
-            <h3>Configuration</h3>
-            <div style="display: flex; flex-direction: column; gap: 10px; margin-top: 1rem;">
-                <input type="text" id="node-id" placeholder="District ID (e.g. Bole_01)"
-                    style="padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #000; color: #fff;">
-                <input type="text" id="region" placeholder="Region Name"
-                    style="padding: 10px; border-radius: 8px; border: 1px solid var(--border); background: #000; color: #fff;">
-                <button onclick="startSimulator()" class="btn-action" style="width: 100%">Connect to Grid</button>
+      <div id="setup-area" class="card control-group">
+        <h3>Configuration</h3>
+        <div
+          style="
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 1rem;
+          "
+        >
+          <input
+            type="text"
+            id="node-id"
+            placeholder="District ID (e.g. Bole_01)"
+            style="
+              padding: 10px;
+              border-radius: 8px;
+              border: 1px solid var(--border);
+              background: #000;
+              color: #fff;
+            "
+          />
+          <input
+            type="text"
+            id="region"
+            placeholder="Region Name"
+            style="
+              padding: 10px;
+              border-radius: 8px;
+              border: 1px solid var(--border);
+              background: #000;
+              color: #fff;
+            "
+          />
+          <button
+            onclick="startSimulator()"
+            class="btn-action"
+            style="width: 100%"
+          >
+            Connect to Grid
+          </button>
+        </div>
+      </div>
+
+      <div id="main-sim" style="display: none">
+        <div class="card control-group">
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            "
+          >
+            <span id="display-id" style="font-weight: 700">---</span>
+            <span
+              id="display-region"
+              style="font-size: 0.85rem; color: var(--text-secondary)"
+              >Region</span
+            >
+          </div>
+          <div style="text-align: center; margin-top: 1rem">
+            <div class="v-display" id="v-val" style="margin-bottom: 0">
+              220.0V
             </div>
+            <span class="status-pill" id="power-label">NORMAL</span>
+          </div>
+          <input
+            type="range"
+            id="v-slider"
+            min="0"
+            max="250"
+            value="220"
+            oninput="updateVoltage(this.value)"
+            style="margin-top: 1.5rem"
+          />
+          <div
+            style="
+              display: flex;
+              justify-content: space-between;
+              font-size: 0.8rem;
+              color: var(--text-secondary);
+            "
+          >
+            <span>0V</span>
+            <span>Outage (0-10V) | Low (170-200V) | Normal (>200V)</span>
+            <span>250V</span>
+          </div>
         </div>
 
-        <div id="main-sim" style="display: none;">
-            <div class="card control-group">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span id="display-id" style="font-weight: 700;">---</span>
-                    <span id="display-region" style="font-size: 0.85rem; color: var(--text-secondary)">Region</span>
-                </div>
-                <div style="text-align: center; margin-top: 1rem;">
-                    <div class="v-display" id="v-val" style="margin-bottom: 0;">220.0V</div>
-                    <span class="status-pill" id="power-label">NORMAL</span>
-                </div>
-                <input type="range" id="v-slider" min="0" max="250" value="220" oninput="updateVoltage(this.value)"
-                    style="margin-top: 1.5rem;">
-                <div
-                    style="display: flex; justify-content: space-between; font-size: 0.8rem; color: var(--text-secondary)">
-                    <span>0V</span>
-                    <span>Outage (0-10V) | Low (170-200V) | Normal (>200V)</span>
-                    <span>250V</span>
-                </div>
-            </div>
-
-            <div class="btn-grid">
-                <button onclick="reportOutage()" class="btn-action" style="background: #ef4444;">Report Outage</button>
-                <button onclick="reportRestore()" class="btn-action" style="background: #22c55e;">Restore Power</button>
-            </div>
-
-            <p id="hq-msg"
-                style="margin-top: 1.5rem; text-align: center; font-size: 0.9rem; color: #eab308; display: none;">
-                🛰️ <b>HQ VERIFICATION:</b> System is checking if power is back...
-            </p>
+        <div class="btn-grid">
+          <button
+            onclick="reportOutage()"
+            class="btn-action"
+            style="background: #ef4444"
+          >
+            Report Outage
+          </button>
+          <button
+            onclick="reportRestore()"
+            class="btn-action"
+            style="background: #22c55e"
+          >
+            Restore Power
+          </button>
         </div>
+
+        <p
+          id="hq-msg"
+          style="
+            margin-top: 1.5rem;
+            text-align: center;
+            font-size: 0.9rem;
+            color: #eab308;
+            display: none;
+          "
+        >
+          🛰️ <b>HQ VERIFICATION:</b> System is checking if power is back...
+        </p>
+      </div>
     </div>
 
     <script>
-        let config = { id: '', region: '', voltage: 220, power: 'NORMAL', active: false, confirmPending: false };
-        let intervals = [];
+      let config = {
+        id: "",
+        region: "",
+        voltage: 220,
+        power: "NORMAL",
+        active: false,
+        confirmPending: false,
+      };
+      let intervals = [];
 
-        function startSimulator() {
-            const id = document.getElementById('node-id').value;
-            const region = document.getElementById('region').value;
-            if (!id) return alert("Enter District ID");
+      async function startSimulator() {
+        const id = document.getElementById("node-id").value;
+        const region = document.getElementById("region").value;
+        if (!id) return alert("Enter District ID");
 
-            config.id = id;
-            config.region = region;
-            config.active = true;
-
-            // Reset power state from 'OFFLINE' and refresh display
-            updateVoltage(config.voltage);
-
-            document.getElementById('setup-area').style.display = 'none';
-            document.getElementById('main-sim').style.display = 'block';
-            document.getElementById('disconnect-btn').style.display = 'inline-block';
-            document.getElementById('display-id').textContent = id;
-            document.getElementById('display-region').textContent = region || "Unknown Region";
-
-            runLifeCycle();
+        // Temporary set for validation
+        config.id = id;
+        config.region = region;
+        
+        // --- PRE-VALIDATION CHECK ---
+        // We try to send one report before opening the UI
+        const success = await sendReport();
+        if (success === false) {
+           // If sendReport found a 403, it already alerted and stopped.
+           return;
         }
 
-        async function disconnect() {
-            if (!confirm("Confirm Disconnect? This will mark the district as OFFLINE.")) return;
+        config.active = true;
+        updateVoltage(config.voltage);
 
-            config.power = 'OFFLINE';
-            // Send one last report announcing departure
-            await sendReport();
+        document.getElementById("setup-area").style.display = "none";
+        document.getElementById("main-sim").style.display = "block";
+        document.getElementById("disconnect-btn").style.display =
+          "inline-block";
+        document.getElementById("display-id").textContent = id;
+        document.getElementById("display-region").textContent =
+          region || "Unknown Region";
 
+        runLifeCycle();
+      }
+
+      async function disconnect() {
+        if (
+          !confirm(
+            "Confirm Disconnect? This will mark the district as OFFLINE."
+          )
+        )
+          return;
+
+        config.power = "OFFLINE";
+        // Send one last report announcing departure
+        await sendReport();
+
+        config.active = false;
+
+        // Stop all background tasks
+        intervals.forEach(clearInterval);
+        intervals = [];
+
+        // Reset UI
+        document.getElementById("setup-area").style.display = "block";
+        document.getElementById("main-sim").style.display = "none";
+        document.getElementById("disconnect-btn").style.display = "none";
+        alert("District " + config.id + " is now offline.");
+      }
+
+      function updateVoltage(v) {
+        config.voltage = v;
+        document.getElementById("v-val").textContent = v + ".0V";
+        const label = document.getElementById("v-val");
+        if (v <= 10) {
+          label.style.color = "#64748b";
+          config.power = "OUTAGE";
+        } else if (v < 170) {
+          label.style.color = "#ef4444";
+          config.power = "VERY LOW";
+        } else if (v < 200) {
+          label.style.color = "#eab308";
+          config.power = "LOW";
+        } else {
+          label.style.color = "#22c55e";
+          config.power = "NORMAL";
+        }
+        document.getElementById("power-label").textContent = config.power;
+        sendReport();
+      }
+
+      function reportOutage() {
+        document.getElementById("v-slider").value = 0;
+        updateVoltage(0);
+      }
+
+      function reportRestore() {
+        document.getElementById("v-slider").value = 220;
+        updateVoltage(220);
+      }
+
+      async function sendReport(cmd = "") {
+        // If not active and not disconnecting, only allow if we have an ID (for pre-validation)
+        if (!config.active && config.power !== "OFFLINE" && !config.id) return;
+        
+        try {
+          const id = encodeURIComponent(config.id);
+          const v = encodeURIComponent(config.voltage);
+          const p = encodeURIComponent(config.power);
+          const r = encodeURIComponent(config.region);
+          const c = encodeURIComponent(cmd);
+          const url = `/api/report_web?id=${id}&v=${v}&p=${p}&r=${r}&cmd=${c}`;
+
+          const response = await fetch(url);
+          if (response.status === 403) {
+            const data = await response.json();
+            alert("🚫 SECURITY REJECTION: " + data.error);
             config.active = false;
-
-            // Stop all background tasks
-            intervals.forEach(clearInterval);
-            intervals = [];
-
-            // Reset UI
-            document.getElementById('setup-area').style.display = 'block';
-            document.getElementById('main-sim').style.display = 'none';
-            document.getElementById('disconnect-btn').style.display = 'none';
-            alert("District " + config.id + " is now offline.");
+            document.getElementById("setup-area").style.display = "block";
+            document.getElementById("main-sim").style.display = "none";
+            return false;
+          }
+          return true;
+        } catch (e) {
+          console.error("Connection error:", e);
+          return false;
         }
+      }
 
-        function updateVoltage(v) {
-            config.voltage = v;
-            document.getElementById('v-val').textContent = v + ".0V";
-            const label = document.getElementById('v-val');
-            if (v <= 10) { label.style.color = '#64748b'; config.power = 'OUTAGE'; }
-            else if (v < 170) { label.style.color = '#ef4444'; config.power = 'VERY LOW'; }
-            else if (v < 200) { label.style.color = '#eab308'; config.power = 'LOW'; }
-            else { label.style.color = '#22c55e'; config.power = 'NORMAL'; }
-            document.getElementById('power-label').textContent = config.power;
-            sendReport();
-        }
+      async function pollCommands() {
+        if (!config.active) return;
+        try {
+          const id = encodeURIComponent(config.id);
+          const res = await fetch(`/api/poll?id=${id}`);
+          const data = await res.json();
+          if (data.command === "SOLVED_CHECK") {
+            // AUTO-CONFIRMATION LOGIC:
+            // Only confirm if voltage is actually normal (>200V)
+            if (config.voltage >= 200) {
+              document.getElementById("hq-msg").style.display = "block";
+              document.getElementById("hq-msg").innerHTML =
+                "✅ <b>AUTO-CONFIRMED:</b> Grid levels are back to normal.";
+              sendReport("CONFIRM_RESOLVED");
+              setTimeout(() => {
+                document.getElementById("hq-msg").style.display = "none";
+              }, 5000);
+            } else {
+              document.getElementById("hq-msg").style.display = "block";
+              document.getElementById("hq-msg").innerHTML =
+                "⚠️ <b>HQ REQUEST:</b> Power is still unstable (Current: " +
+                config.voltage +
+                "V). Fix it now!";
+              setTimeout(() => {
+                document.getElementById("hq-msg").style.display = "none";
+              }, 5000);
+            }
+          }
+        } catch (e) {}
+      }
 
-        function reportOutage() {
-            document.getElementById('v-slider').value = 0;
-            updateVoltage(0);
-        }
+      function confirmResolved() {
+        document.getElementById("hq-msg").style.display = "none";
+        sendReport("CONFIRM_RESOLVED");
+        alert("Confirmation sent to HQ!");
+      }
 
-        function reportRestore() {
-            document.getElementById('v-slider').value = 220;
-            updateVoltage(220);
-        }
-
-        async function sendReport(cmd = '') {
-            if (!config.active && config.power !== 'OFFLINE') return;
-            try {
-                const id = encodeURIComponent(config.id);
-                const v = encodeURIComponent(config.voltage);
-                const p = encodeURIComponent(config.power);
-                const r = encodeURIComponent(config.region);
-                const c = encodeURIComponent(cmd);
-                const url = `/api/report_web?id=${id}&v=${v}&p=${p}&r=${r}&cmd=${c}`;
-                await fetch(url);
-            } catch (e) { }
-        }
-
-        async function pollCommands() {
-            if (!config.active) return;
-            try {
-                const id = encodeURIComponent(config.id);
-                const res = await fetch(`/api/poll?id=${id}`);
-                const data = await res.json();
-                if (data.command === 'SOLVED_CHECK') {
-                    // AUTO-CONFIRMATION LOGIC:
-                    // Only confirm if voltage is actually normal (>200V)
-                    if (config.voltage >= 200) {
-                        document.getElementById('hq-msg').style.display = 'block';
-                        document.getElementById('hq-msg').innerHTML = "✅ <b>AUTO-CONFIRMED:</b> Grid levels are back to normal.";
-                        sendReport('CONFIRM_RESOLVED');
-                        setTimeout(() => {
-                            document.getElementById('hq-msg').style.display = 'none';
-                        }, 5000);
-                    } else {
-                        document.getElementById('hq-msg').style.display = 'block';
-                        document.getElementById('hq-msg').innerHTML = "⚠️ <b>HQ REQUEST:</b> Power is still unstable (Current: " + config.voltage + "V). Fix it now!";
-                        setTimeout(() => {
-                           document.getElementById('hq-msg').style.display = 'none';
-                        }, 5000);
-                    }
-                }
-            } catch (e) { }
-        }
-
-        function confirmResolved() {
-            document.getElementById('hq-msg').style.display = 'none';
-            sendReport('CONFIRM_RESOLVED');
-            alert("Confirmation sent to HQ!");
-        }
-
-        function runLifeCycle() {
-            intervals.push(setInterval(sendReport, 5000)); // Pulse heartbeat
-            intervals.push(setInterval(pollCommands, 2000)); // Check for HQ messages
-        }
+      function runLifeCycle() {
+        intervals.push(setInterval(sendReport, 5000)); // Pulse heartbeat
+        intervals.push(setInterval(pollCommands, 2000)); // Check for HQ messages
+      }
     </script>
-</body>
-
+  </body>
 </html>
