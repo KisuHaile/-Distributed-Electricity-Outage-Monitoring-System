@@ -86,7 +86,8 @@ public class SimpleWebServer {
         public void handle(HttpExchange t) throws IOException {
             String json = "[]";
             try (Connection conn = DBConnection.getConnection()) {
-                String query = "SELECT node_id, status, last_load_percent, last_power_state, transformer_health, " +
+                String query = "SELECT node_id, status, last_load_percent, last_power_state, transformer_health, verification_status, "
+                        +
                         "DATE_FORMAT(last_seen, '%H:%i:%s') as last_seen_time " +
                         "FROM nodes ORDER BY node_id";
 
@@ -105,6 +106,8 @@ public class SimpleWebServer {
                         sb.append("\"load\":").append(rs.getInt("last_load_percent")).append(",");
                         sb.append("\"power\":\"").append(escape(rs.getString("last_power_state"))).append("\",");
                         sb.append("\"transformer\":\"").append(escape(rs.getString("transformer_health")))
+                                .append("\",");
+                        sb.append("\"verificationStatus\":\"").append(escape(rs.getString("verification_status")))
                                 .append("\",");
                         sb.append("\"lastSeen\":\"").append(escape(rs.getString("last_seen_time"))).append("\"");
                         sb.append("}");
@@ -280,7 +283,7 @@ public class SimpleWebServer {
                 // Check for confirmed restoration
                 String cmd = params.get("cmd");
                 if ("CONFIRM_RESOLVED".equalsIgnoreCase(cmd)) {
-                    String update = "UPDATE nodes SET status='ONLINE', last_power_state='NORMAL' WHERE node_id=?";
+                    String update = "UPDATE nodes SET status='ONLINE', last_power_state='NORMAL', verification_status='CONFIRMED' WHERE node_id=?";
                     try (java.sql.PreparedStatement ps = conn.prepareStatement(update)) {
                         ps.setString(1, id);
                         ps.executeUpdate();
@@ -320,16 +323,67 @@ public class SimpleWebServer {
                 return;
             }
 
-            // Try TCP Client first
-            ClientHandler handler = ClientHandler.getHandler(id);
-            if (handler != null) {
-                handler.sendMessage("SOLVED_CHECK");
-                send(t, 200, "{\"status\":\"sent\"}");
-            } else {
-                // Not local? Queue for Web Simulator AND broadcast to peers
-                queueCommand(id, "SOLVED_CHECK");
-                HeadlessServer.broadcastSync("VERIFY_RELAY|" + id);
-                send(t, 200, "{\"status\":\"queued_web\"}");
+            try (Connection conn = DBConnection.getConnection()) {
+                // 1. Check current state
+                String currentStatus = "OFFLINE";
+                String vStatus = "NONE";
+                long vTime = 0;
+
+                try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                        "SELECT status, verification_status, verification_ts FROM nodes WHERE node_id=?")) {
+                    ps.setString(1, id);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (rs.next()) {
+                            currentStatus = rs.getString("status");
+                            vStatus = rs.getString("verification_status");
+                            java.sql.Timestamp ts = rs.getTimestamp("verification_ts");
+                            if (ts != null)
+                                vTime = ts.getTime();
+                        } else {
+                            send(t, 404, "{\"error\":\"Node not found\"}");
+                            return;
+                        }
+                    }
+                }
+
+                // 2. Validate
+                if ("OFFLINE".equals(currentStatus)) {
+                    send(t, 400, "{\"error\":\"Cannot verify OFFLINE node. Check connectivity first.\"}");
+                    return;
+                }
+
+                if ("PENDING".equals(vStatus)) {
+                    // Check for timeout (e.g., 30 seconds) to allow retry
+                    if (System.currentTimeMillis() - vTime < 30000) {
+                        send(t, 409, "{\"error\":\"Verification already PENDING. Please wait.\"}");
+                        return;
+                    }
+                }
+
+                // 3. Update DB
+                try (java.sql.PreparedStatement ps = conn.prepareStatement(
+                        "UPDATE nodes SET verification_status='PENDING', verification_ts=NOW() WHERE node_id=?")) {
+                    ps.setString(1, id);
+                    ps.executeUpdate();
+                }
+
+                // 4. Log Audit Event
+                com.electricity.db.EventLogger.logEvent(id, "MANUAL_VERIFY", "Operator requested verification");
+
+                // 5. Send Request
+                ClientHandler handler = ClientHandler.getHandler(id);
+                if (handler != null) {
+                    handler.sendMessage("SOLVED_CHECK");
+                    send(t, 200, "{\"status\":\"sent\"}");
+                } else {
+                    queueCommand(id, "SOLVED_CHECK");
+                    HeadlessServer.broadcastSync("VERIFY_RELAY|" + id);
+                    send(t, 200, "{\"status\":\"queued_web\"}");
+                }
+
+            } catch (Exception e) {
+                e.printStackTrace();
+                send(t, 500, "{\"error\":\"" + e.getMessage() + "\"}");
             }
         }
 

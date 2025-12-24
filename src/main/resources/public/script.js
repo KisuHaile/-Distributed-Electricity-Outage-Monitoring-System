@@ -197,13 +197,22 @@ function openModal(node, voltage, region, vLabel) {
             <span class="detail-label">Last Seen</span>
             <span class="detail-value">${node.lastSeen}</span>
         </div>
+        <div class="detail-row">
+             <span class="detail-label">Verification</span>
+             <span class="detail-value" style="color: ${node.verificationStatus === 'PENDING' ? '#f59e0b' : '#94a3b8'}">
+                ${node.verificationStatus || 'NONE'}
+             </span>
+        </div>
         ${
-          node.power !== "NORMAL" ||
+          (node.power !== "NORMAL" ||
           vLabel !== "Normal" ||
-          node.status !== "ONLINE"
+          node.status !== "ONLINE") && node.verificationStatus !== 'CONFIRMED'
             ? `
         <div style="margin-top: 1.5rem;">
-            <button onclick="verifyNode('${node.id}')" class="btn-action" style="width: 100%; padding: 0.8rem; border-radius: 8px; background: #eab308; color: #000;">Check Again & Confirm</button>
+            ${node.verificationStatus === 'PENDING' 
+                ? `<button disabled class="btn-action" style="width: 100%; padding: 0.8rem; border-radius: 8px; background: #475569; color: #94a3b8; cursor: not-allowed;">⏳ Verification Pending...</button>`
+                : `<button onclick="verifyNode('${node.id}')" class="btn-action" style="width: 100%; padding: 0.8rem; border-radius: 8px; background: #eab308; color: #000;">Check Again & Confirm</button>`
+            }
         </div>
         `
             : ""

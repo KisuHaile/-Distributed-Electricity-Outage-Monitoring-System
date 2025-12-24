@@ -176,7 +176,7 @@ public class ClientHandler implements Runnable {
         String nodeId = p[1];
         System.out.println("[Sync-In] >>> CONFIRMATION RECEIVED for District " + nodeId);
         try (Connection conn = DBConnection.getConnection()) {
-            String update = "UPDATE nodes SET status='ONLINE', last_power_state='NORMAL', last_seen=NOW() WHERE node_id=?";
+            String update = "UPDATE nodes SET status='ONLINE', last_power_state='NORMAL', verification_status='CONFIRMED', last_seen=NOW() WHERE node_id=?";
             try (PreparedStatement ps = conn.prepareStatement(update)) {
                 ps.setString(1, nodeId);
                 int count = ps.executeUpdate();

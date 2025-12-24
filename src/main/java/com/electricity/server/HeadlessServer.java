@@ -94,10 +94,6 @@ public class HeadlessServer {
         SimpleWebServer webServer = new SimpleWebServer(webPort);
         webServer.start();
 
-        // 2.5 Log Startup Event
-        com.electricity.db.EventLogger.logEvent("SYSTEM", "SERVER_STARTUP",
-                "Server ID " + id + " started on port " + port);
-
         // 3. Start Core Server Logic
         startServerThreads(id, port, peerConfig);
 
@@ -299,6 +295,109 @@ public class HeadlessServer {
                                 return expired;
                             });
                             checkLeadership();
+                        } catch (InterruptedException e) {
+                            break;
+                        }
+                    }
+                }).start();
+
+                // Start Verification Monitor Thread
+                new Thread(() -> {
+                    while (running) {
+                        try {
+                            Thread.sleep(5000);
+                            if (!amILeader)
+                                continue; // Only leader orchestrates timeouts to avoid fighting
+
+                            try (java.sql.Connection conn = com.electricity.db.DBConnection.getConnection()) {
+                                String sql = "UPDATE nodes SET verification_status='TIMEOUT', status='OFFLINE' " + // Assume
+                                                                                                                   // offline
+                                                                                                                   // if
+                                                                                                                   // timeout?
+                                                                                                                   // Or
+                                                                                                                   // just
+                                                                                                                   // TIMEOUT
+                                                                                                                   // status?
+                                                                                                                   // User
+                                                                                                                   // said
+                                                                                                                   // "TIMEOUT"
+                                                                                                                   // state.
+                                        "WHERE verification_status='PENDING' " +
+                                        "AND verification_ts < (NOW() - INTERVAL 30 SECOND)";
+
+                                // Need to know WHO timed out to log it. So separate SELECT then UPDATE is
+                                // better.
+
+                                // 1. Find timeouts
+                                String select = "SELECT node_id FROM nodes WHERE verification_status='PENDING' AND verification_ts < (NOW() - INTERVAL 30 SECOND)";
+                                try (java.sql.Statement stmt = conn.createStatement();
+                                        java.sql.ResultSet rs = stmt.executeQuery(select)) {
+                                    while (rs.next()) {
+                                        String nid = rs.getString("node_id");
+                                        com.electricity.db.EventLogger.logEvent(nid, "VERIFICATION_TIMEOUT",
+                                                "Node failed to confirm status within 30s");
+                                    }
+                                }
+
+                                // 2. Bulk Update
+                                try (java.sql.Statement stmt = conn.createStatement()) {
+                                    stmt.executeUpdate(sql);
+                                }
+
+                            } catch (Exception e) {
+                                System.err.println("[VerifyMonitor] Error: " + e.getMessage());
+                            }
+
+                        } catch (InterruptedException e) {
+                            break;
+                        }
+                    }
+                }).start();
+
+                // Start Connection Monitor Thread (For Clients/Simulators)
+                new Thread(() -> {
+                    while (running) {
+                        try {
+                            Thread.sleep(5000); // Check every 5s
+                            if (!amILeader)
+                                continue; // Only leader orchestrates timeouts
+
+                            try (java.sql.Connection conn = com.electricity.db.DBConnection.getConnection()) {
+                                // 1. Identify nodes that have TIMED OUT (e.g. not seen for 20 seconds)
+                                // AND are not already marked OFFLINE
+                                String findSql = "SELECT node_id FROM nodes WHERE last_seen < (NOW() - INTERVAL 20 SECOND) AND status != 'OFFLINE'";
+
+                                java.util.List<String> timeoutNodes = new java.util.ArrayList<>();
+                                try (java.sql.Statement stmt = conn.createStatement();
+                                        java.sql.ResultSet rs = stmt.executeQuery(findSql)) {
+                                    while (rs.next()) {
+                                        timeoutNodes.add(rs.getString("node_id"));
+                                    }
+                                }
+
+                                // 2. Mark them OFFLINE and Log Event
+                                if (!timeoutNodes.isEmpty()) {
+                                    String updateSql = "UPDATE nodes SET status='OFFLINE', last_power_state='UNKNOWN' WHERE node_id=?";
+                                    try (java.sql.PreparedStatement ps = conn.prepareStatement(updateSql)) {
+                                        for (String nid : timeoutNodes) {
+                                            ps.setString(1, nid);
+                                            ps.addBatch();
+
+                                            // Log event
+                                            com.electricity.db.EventLogger.logEvent(nid, "CONNECTION_LOST",
+                                                    "Node heartbeat timed out (>20s)");
+                                            System.out.println(
+                                                    "[Monitor] Node " + nid + " marked OFFLINE due to timeout.");
+                                        }
+                                        ps.executeBatch();
+                                    }
+
+                                    // Optional: Broadcast this change to peers so they know?
+                                    // They share DB, but a SYNC message helps update in real-time memory if needed.
+                                }
+                            } catch (Exception e) {
+                                System.err.println("[ConnMonitor] Error: " + e.getMessage());
+                            }
                         } catch (InterruptedException e) {
                             break;
                         }

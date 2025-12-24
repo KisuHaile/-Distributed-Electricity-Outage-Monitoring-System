@@ -9,7 +9,9 @@ CREATE TABLE IF NOT EXISTS nodes (
     last_power_state VARCHAR(20),
     last_load_percent INT,
     transformer_health VARCHAR(255),
-    status VARCHAR(50)
+    status VARCHAR(50),
+    verification_status VARCHAR(20) DEFAULT 'NONE',
+    verification_ts TIMESTAMP NULL
 );
 
 INSERT IGNORE INTO
@@ -43,10 +45,6 @@ VALUES (
         'South Addis Ababa',
         'OFFLINE'
     );
-
-INSERT IGNORE INTO
-    nodes (node_id, region, status)
-VALUES ('SYSTEM', 'Admin', 'ONLINE');
 
 CREATE TABLE IF NOT EXISTS events (
     event_id VARCHAR(100) PRIMARY KEY,
