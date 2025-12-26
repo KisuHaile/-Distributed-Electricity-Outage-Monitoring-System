@@ -57,7 +57,7 @@ function updateDashboard(nodes) {
     let rawInfo = node.transformer || "0.0V | Unknown";
     let parts = rawInfo.split("|");
     let voltageStr = parts[0].trim();
-    let regionStr = parts.length > 1 ? parts[1].trim() : "Unknown";
+    let regionStr = node.region || (parts.length > 1 && parts[1].trim() !== "Unknown" ? parts[1].trim() : "West Addis Ababa");
 
     // 2. Stats
     if (node.status === "ONLINE") onlineCount++;

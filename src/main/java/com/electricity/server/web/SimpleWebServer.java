@@ -86,7 +86,7 @@ public class SimpleWebServer {
         public void handle(HttpExchange t) throws IOException {
             String json = "[]";
             try (Connection conn = DBConnection.getConnection()) {
-                String query = "SELECT node_id, status, last_load_percent, last_power_state, transformer_health, verification_status, "
+                String query = "SELECT node_id, region, status, last_load_percent, last_power_state, transformer_health, verification_status, "
                         +
                         "DATE_FORMAT(last_seen, '%H:%i:%s') as last_seen_time " +
                         "FROM nodes ORDER BY node_id";
@@ -102,6 +102,7 @@ public class SimpleWebServer {
                             sb.append(",");
                         sb.append("{");
                         sb.append("\"id\":\"").append(escape(rs.getString("node_id"))).append("\",");
+                        sb.append("\"region\":\"").append(escape(rs.getString("region"))).append("\",");
                         sb.append("\"status\":\"").append(escape(rs.getString("status"))).append("\",");
                         sb.append("\"load\":").append(rs.getInt("last_load_percent")).append(",");
                         sb.append("\"power\":\"").append(escape(rs.getString("last_power_state"))).append("\",");
