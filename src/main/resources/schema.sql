@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS nodes (
     transformer_health VARCHAR(255),
     status VARCHAR(50),
     verification_status VARCHAR(20) DEFAULT 'NONE',
-    verification_ts TIMESTAMP NULL
+    verification_ts TIMESTAMP NULL,
+    logical_timestamp BIGINT DEFAULT 0
 );
 
 INSERT IGNORE INTO
@@ -51,6 +52,7 @@ CREATE TABLE IF NOT EXISTS events (
     node_id VARCHAR(100),
     event_type VARCHAR(50),
     timestamp DATETIME,
+    logical_timestamp BIGINT DEFAULT 0,
     metadata TEXT,
     processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

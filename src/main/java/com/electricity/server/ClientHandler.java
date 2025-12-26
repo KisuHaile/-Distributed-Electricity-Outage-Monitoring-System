@@ -78,9 +78,27 @@ public class ClientHandler implements Runnable {
         String line;
         while ((line = in.readLine()) != null) {
             if (line.startsWith("SYNC|")) {
-                String sub = line.substring(5);
-                System.out.println("[Sync-In] Processing sync message: " + sub);
-                handleMessage(sub);
+                String sub = line.substring(5); // Remove "SYNC|"
+
+                // Lab 4: Extract Lamport timestamp from sync message
+                // Format: SYNC|timestamp|actual_message
+                String[] parts = sub.split("\\|", 2);
+                if (parts.length >= 2) {
+                    try {
+                        long receivedTimestamp = Long.parseLong(parts[0]);
+                        HeadlessServer.getClock().update(receivedTimestamp);
+                        System.out.println(
+                                "[Sync-In] Processing sync message with LT=" + receivedTimestamp + ": " + parts[1]);
+                        handleMessage(parts[1]);
+                    } catch (NumberFormatException e) {
+                        // Fallback for old format without timestamp
+                        System.out.println("[Sync-In] Processing sync message (legacy format): " + sub);
+                        handleMessage(sub);
+                    }
+                } else {
+                    System.out.println("[Sync-In] Processing sync message: " + sub);
+                    handleMessage(sub);
+                }
             }
         }
     }
@@ -182,8 +200,9 @@ public class ClientHandler implements Runnable {
                 int count = ps.executeUpdate();
                 if (count > 0) {
                     System.out.println("[Sync-DB] District " + nodeId + " status RESTORED to ONLINE via confirmation.");
+                    long lamportTime = HeadlessServer.getClock().tick();
                     com.electricity.db.EventLogger.logEvent(nodeId, "MANUAL_RESTORE_CONFIRMED",
-                            "Admin/Client confirmed grid restoration.");
+                            "Admin/Client confirmed grid restoration.", lamportTime);
                 } else {
                     System.out.println("[Sync-DB] WARNING: No node found with ID " + nodeId + " to confirm.");
                 }
@@ -256,9 +275,11 @@ public class ClientHandler implements Runnable {
             // Detect Power State Change for Event Logging
             String eventType = com.electricity.db.EventLogger.determineEventType(powerState, oldPowerState);
             if (eventType != null) {
+                // Lab 4: Increment Lamport clock for local event
+                long lamportTime = HeadlessServer.getClock().tick();
                 String metadata = String.format("Voltage: %.1fV, Previous: %s, Region: %s", voltage, oldPowerState,
                         region);
-                com.electricity.db.EventLogger.logEvent(incomingNodeId, eventType, metadata);
+                com.electricity.db.EventLogger.logEvent(incomingNodeId, eventType, metadata, lamportTime);
             }
 
             if ("ONLINE".equals(statusToUpdate) && ("OUTAGE".equals(currentStatus) || "ISSUE".equals(currentStatus))) {
@@ -316,7 +337,9 @@ public class ClientHandler implements Runnable {
 
         try (Connection conn = DBConnection.getConnection()) {
             // Log via Central Logger
-            com.electricity.db.EventLogger.logEvent(incomingNodeId, type, "Explicit Outage Report: " + p[5]);
+            long lamportTime = HeadlessServer.getClock().tick();
+            com.electricity.db.EventLogger.logEvent(incomingNodeId, type, "Explicit Outage Report: " + p[5],
+                    lamportTime);
 
             if (type.contains("START"))
                 updateNodeState(conn, incomingNodeId, "OFFLINE");

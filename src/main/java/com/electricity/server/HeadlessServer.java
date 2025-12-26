@@ -4,6 +4,7 @@ import com.electricity.db.DBConnection;
 import com.electricity.service.DiscoveryService;
 import com.electricity.server.web.SimpleWebServer;
 import com.electricity.model.Peer;
+import com.electricity.clock.LamportClock;
 
 import java.io.IOException;
 import java.net.ServerSocket;
@@ -22,6 +23,9 @@ public class HeadlessServer {
     private static DiscoveryService discoveryService;
     private static final java.util.Map<Integer, Peer> activePeers = new java.util.concurrent.ConcurrentHashMap<>();
     private static final java.util.Set<Integer> manualPeerIds = new java.util.concurrent.ConcurrentSkipListSet<>();
+
+    // Lab 4: Lamport Logical Clock for distributed event ordering
+    private static final LamportClock lamportClock = new LamportClock();
 
     private static void printLocalIPs() {
         System.out.println("--- Network Diagnostics ---");
@@ -94,7 +98,11 @@ public class HeadlessServer {
         SimpleWebServer webServer = new SimpleWebServer(webPort);
         webServer.start();
 
-        // 3. Start Core Server Logic
+        // 3. Start RMI Server (Lab 2: Remote Admin Interface)
+        System.out.println("[RMI] Starting Remote Admin Interface...");
+        com.electricity.rmi.RMIServer.start();
+
+        // 4. Start Core Server Logic
         startServerThreads(id, port, peerConfig);
 
         // 4. Keep Main Thread Alive (Enter 'q' to quit)
@@ -130,11 +138,19 @@ public class HeadlessServer {
         return amILeader;
     }
 
+    public static LamportClock getClock() {
+        return lamportClock;
+    }
+
     public static void broadcastSync(String msg) {
         if (activePeers.isEmpty())
             return;
         System.out.println("[Sync] Broadcasting update to " + activePeers.size() + " peers...");
-        String syncMsg = "SYNC|" + msg;
+
+        // Lab 4: Increment Lamport clock before sending
+        long timestamp = lamportClock.tick();
+        String syncMsg = "SYNC|" + timestamp + "|" + msg;
+
         for (Peer p : activePeers.values()) {
             new Thread(() -> {
                 int retries = 3;
@@ -189,7 +205,9 @@ public class HeadlessServer {
                                 voltage = health.split("V")[0].trim();
                             }
 
-                            out.println("SYNC|REPORT|" + id + "|" + voltage + "|" + power + "|" + region);
+                            long timestamp = lamportClock.tick();
+                            out.println(
+                                    "SYNC|" + timestamp + "|REPORT|" + id + "|" + voltage + "|" + power + "|" + region);
                             count++;
                         }
                         System.out.println(
@@ -334,8 +352,9 @@ public class HeadlessServer {
                                         java.sql.ResultSet rs = stmt.executeQuery(select)) {
                                     while (rs.next()) {
                                         String nid = rs.getString("node_id");
+                                        long lamportTime = lamportClock.tick();
                                         com.electricity.db.EventLogger.logEvent(nid, "VERIFICATION_TIMEOUT",
-                                                "Node failed to confirm status within 30s");
+                                                "Node failed to confirm status within 30s", lamportTime);
                                     }
                                 }
 
@@ -384,8 +403,9 @@ public class HeadlessServer {
                                             ps.addBatch();
 
                                             // Log event
+                                            long lamportTime = lamportClock.tick();
                                             com.electricity.db.EventLogger.logEvent(nid, "CONNECTION_LOST",
-                                                    "Node heartbeat timed out (>20s)");
+                                                    "Node heartbeat timed out (>20s)", lamportTime);
                                             System.out.println(
                                                     "[Monitor] Node " + nid + " marked OFFLINE due to timeout.");
                                         }
